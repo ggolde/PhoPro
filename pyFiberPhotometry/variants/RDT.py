@@ -631,11 +631,13 @@ def RDT_process_whole_directory(
              f'and {n_poorSignal} poor signals out of '
              f'{n_experiments} experiments')
 
-    log.info(f'Reseting index of trial data...')
     if low_memory_mode:
+        log.info(f"Reading back in full trial data...")
         trial_data = RDT_PhotometryData.read_h5ad(trial_data_path)
     elif save_baselines:
+        log.info(f"Saving baseline curve...")
         baseline_data.write_h5ad(baseline_data_path)
+    log.info(f'Reseting index of trial data...')
     trial_data.adata.obs.reset_index(drop=True, inplace=True)
     trial_data.adata.obs.index = trial_data.adata.obs.index.astype(str)
     trial_data.write_h5ad(trial_data_path)
