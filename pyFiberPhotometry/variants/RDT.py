@@ -198,13 +198,16 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         cutoff_frequency: float = 30.0,
         order: int = 4,
         preprocess_method: str = 'dF/F',
+        preprocess_normalization: Literal['nullZ', 'none'] = 'nullZ',
+        c: float = 3,
+        maxiter: int = 200,
         
         align_to: str = 'Hsl',
         center_on: list[str] = ['Lrg', 'Sml'],
-        trial_bounds: Tuple[float, float] = (-10.0, 5.0),
+        trial_bounds: Tuple[float, float] = (-23.0, 5.0),
         baseline_bounds: Tuple[float, float] = (-5, -1),
         event_tolerences: Dict[str, Tuple[float, float]] = {'Lrg' : (5, 18), 'Sml' : (5, 18), 'Zap': (4.5, 18.5)},
-        normalization: Literal['zscore', 'zero'] = 'zscore',
+        normalization: Literal['zscore', 'zero', 'none'] = 'none',
         check_overlap: bool = False,
         poor_signal_threshold: float = 0.075,
         time_error_threshold: float = 0.01,
@@ -214,6 +217,7 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         block_labels: list[str] = ("0%", "25%", "75%"),
         qc_drop: bool = False,
         to_trim: list[str] = ['Lrg', 'Sml'],
+
     ) -> None:
         """
         Run full RDT pipeline: extract, preprocess, window trials, label, QC, and optionally save.
@@ -223,12 +227,15 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
             cutoff_frequency (float): Low-pass filter cutoff in Hz.
             order (int): Butterworth filter order.
             preprocess_method (str): Preprocessing method, e.g. 'dF/F' or 'dF'.
+            preprocess_normalization (str): Normalization for whole processed signal, 'nullZ' or 'none'.
+            c (float): Tukey-biweight IRLS parameter, lower means more aggressive downweighting. 1.4 <= c <= 3 is recommended.
+            maxiter (int): Maximum iterations for IRLS isosbestic to signal fitting.
             align_to (str): Primary event label used to align trials.
             center_on (list[str]): Events used to refine trial centers.
             trial_bounds (tuple[float, float]): Trial window bounds relative to center.
             baseline_bounds (tuple[float, float]): Baseline window bounds relative to center.
             event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation.
-            normalization (Literal['zscore', 'zero']): Trial normalization method.
+            normalization (Literal['zscore', 'zero', 'none']): Trial normalization method.
             check_overlap (bool): Whether to throw an error multiple ``center_on`` events are found in the same trial.
             poor_signal_threshold (float): Threshold for poor signal checking.
             time_error_threshold (float): Threshold on timing error for sanity check.
@@ -254,7 +261,14 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
 
         # step 2: preprocess signal with lowpass filter and dF/F strategy
         log.info(f"Preprocessing signal...")
-        self.preprocess_signal(cutoff_frequency=cutoff_frequency, order=order, method=preprocess_method)
+        self.preprocess_signal(
+            cutoff_frequency=cutoff_frequency, 
+            order=order, 
+            method=preprocess_method, 
+            normalization=preprocess_normalization,
+            c=c,
+            maxiter=maxiter,
+        )
         log.info(f"Done. Fitted isosbestic R2 = {self.metadata['isosbestic_fit']['r2_val']:.4f}")
 
         # step 3: extract per-trial data
@@ -295,10 +309,10 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         self,
         align_to: str = 'Hsl',
         center_on: list[str] = ['Lrg', 'Sml'],
-        trial_bounds: Tuple[float, float] = (-10.0, 5.0),
+        trial_bounds: Tuple[float, float] = (-23.0, 5.0),
         baseline_bounds: Tuple[float, float] = (-5, -1),
         event_tolerences: Dict[str, Tuple[float, float]] = {'Lrg' : (5, 18), 'Sml' : (5, 18), 'Zap': (4.5, 18.5)},
-        normalization: Literal['zscore', 'zero'] = 'zscore',
+        normalization: Literal['zscore', 'zero', 'none'] = 'none',
         check_overlap: bool = False,
         poor_signal_threshold: float = 0.075,
         time_error_threshold: float = 0.01,
@@ -311,7 +325,7 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
             trial_bounds (tuple[float, float]): Trial window bounds relative to center.
             baseline_bounds (tuple[float, float]): Baseline window bounds relative to center.
             event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation.
-            normalization (Literal['zscore', 'zero']): Trial normalization method.
+            normalization (Literal['zscore', 'zero', 'none']): Trial normalization method.
             check_overlap (bool): Whether to throw an error multiple ``center_on`` events are found in the same trial.
             poor_signal_threshold (float): Threshold for poor signal checking.
             time_error_threshold (float): Threshold on timing error for sanity check.
@@ -465,7 +479,7 @@ def RDT_process_whole_directory(
     log_file: str | None = None,
     fit_photobleaching: bool = True,
     save_baselines: bool = True,
-    save_dashboards: bool = False,
+    save_dashboards: Literal[True, False, 'on_poor_signal'] = False,
 
     trial_data_file: str = 'trials.h5ad',
     baseline_data_file: str = 'baselines.h5ad',
@@ -473,7 +487,7 @@ def RDT_process_whole_directory(
     dashboard_folder: str = 'dashboard_plots',
 
     boxes: List[str] = ['A', 'B'],
-    event_labels: list[str] = ('Lrg', 'Sml', 'Hsl', 'Zap'),
+    event_labels: List[str] = ('Lrg', 'Sml', 'Hsl', 'Zap'),
     signal_label: str = '_465',
     isosbestic_label: str = '_405',
     annotation_filename: str = 'annotations.json',
@@ -489,7 +503,8 @@ def RDT_process_whole_directory(
         log_file (str) : Path to log file.
         fit_photobleaching (bool) : Whether to fit a photobleaching curve to raw signal.
         save_baselines (bool) : Whether to save trial-wise baseline data.
-        save_dashboards (bool) : Whether to save graphical dashboard for each experiment.
+        save_dashboards (Literal[True, False, 'on_poor_signal']) : Whether to save graphical dashboard for each experiment, 
+            or only on experiments flagged as having poor signal.
 
         trial_data_file (str) : Name for trial data output file.
         baseline_data_file (str) : Name for baseline data output file.
@@ -572,8 +587,12 @@ def RDT_process_whole_directory(
                     photobleach_fit, _ = exp.fit_photobleaching_curve(return_curve=False, **photobleaching_fit_kwargs)
                     append_to_csv(str(photobleach_curve_path), photobleach_fit)
                 
-                if save_dashboards:
+                if save_dashboards == True:
                     log.info(f"Plotting and saving dashboard...")
+                    save_path = os.path.join(dashboard_folder_abs, getattr(exp, 'id', 'Unnamed') + '.svg')
+                    exp.dashboard(save=save_path)
+                elif (save_dashboards == 'on_poor_signal') and exp.poorSignalFlag:
+                    log.info(f"Plotting and saving dashboard due to poorSignalFlag...")
                     save_path = os.path.join(dashboard_folder_abs, getattr(exp, 'id', 'Unnamed') + '.svg')
                     exp.dashboard(save=save_path)
 

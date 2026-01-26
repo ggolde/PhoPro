@@ -56,6 +56,7 @@ class PhotometryData:
             PhotometryData
         """
         obs = obs.copy()
+        obs.reset_index(drop=True, inplace=True)
         obs.index = obs.index.astype(str)
         var = pd.DataFrame({"t": time_points})
         var.index = var.index.astype(str)
@@ -107,7 +108,7 @@ class PhotometryData:
         """     
         self.adata.write_zarr(path)
 
-    def append_on_disk_h5ad(self, path: str) -> None:
+    def append_on_disk_h5ad(self, path: str, uns_merge: str = 'first') -> None:
         """
         Append this object's data to an existing .h5ad file on disk or create it if it does not exist.
         Args:
@@ -134,7 +135,7 @@ class PhotometryData:
                 axis='obs',
                 join='inner',
                 merge='same',
-                uns_merge='same',
+                uns_merge=uns_merge,
             )
         except Exception as e:
             os.rename(tmp_path_old, path)
@@ -155,6 +156,8 @@ class PhotometryData:
     @property
     def var(self) -> pd.DataFrame: return self.adata.var
     @property
+    def uns(self) -> dict: return self.adata.uns
+    @property
     def n_trials(self) -> int: return self.adata.n_obs
     @property
     def n_times(self) -> int: return self.adata.n_vars
@@ -163,7 +166,7 @@ class PhotometryData:
     def _agg(
             self, 
             method: Callable[..., np.ndarray], 
-            group_on: List[str], 
+            group_on: List[str] | None, 
             data_cols: List[str], 
             count_col: str | None = None
             ) -> Tuple[pd.DataFrame, np.ndarray]:
@@ -180,18 +183,27 @@ class PhotometryData:
         X = np.asarray(self.adata.X)
         obs = self.adata.obs
 
-        groups = obs.groupby(group_on, sort=False, observed=False).indices
-        n_groups = len(groups)
-        new_cols = group_on + data_cols if count_col is None else group_on + [count_col] + data_cols
-        
-        X_agg = np.empty((n_groups, X.shape[1]), dtype=X.dtype)
-        obs_agg = pd.DataFrame(columns=new_cols, index=range(n_groups))
+        if group_on is None or len(group_on) == 0:
+            new_cols = data_cols if count_col is None else [count_col] + data_cols
+            
+            X_agg = method(X, axis=0)[np.newaxis, :]
+            obs_agg = pd.DataFrame(columns=new_cols, index=[0])
+            obs_agg.loc[0, data_cols] = method(obs.loc[:, data_cols], axis=0)
+            if count_col is not None: obs_agg.loc[0, count_col] = obs.index.size
 
-        for i, (gkey, idxs) in enumerate(groups.items()):
-            X_agg[i] = method(X[idxs], axis=0)
-            obs_agg.loc[i, group_on] = gkey
-            obs_agg.loc[i, data_cols] = method(obs.iloc[idxs][data_cols], axis=0)
-            if count_col is not None: obs_agg.loc[i, count_col] = len(idxs)
+        else:
+            groups = obs.groupby(group_on, sort=False, observed=False).indices
+            n_groups = len(groups)
+            new_cols = group_on + data_cols if count_col is None else group_on + [count_col] + data_cols
+            
+            X_agg = np.empty((n_groups, X.shape[1]), dtype=X.dtype)
+            obs_agg = pd.DataFrame(columns=new_cols, index=range(n_groups))
+
+            for i, (gkey, idxs) in enumerate(groups.items()):
+                X_agg[i] = method(X[idxs], axis=0)
+                obs_agg.loc[i, group_on] = gkey
+                obs_agg.loc[i, data_cols] = method(obs.iloc[idxs][data_cols], axis=0)
+                if count_col is not None: obs_agg.loc[i, count_col] = len(idxs)
 
         # clean dtypes
         obs_agg = obs_agg.infer_objects()
@@ -228,7 +240,7 @@ class PhotometryData:
 
     def collapse(
             self,
-            group_on: List[str],
+            group_on: List[str] | None,
             method: function = np.nanmean,
             metrics: Dict[str : function] = {},
             data_cols: list[str] = [],
@@ -237,7 +249,7 @@ class PhotometryData:
         """
         Collapse trials by grouping obs and aggregating X and selected obs columns.
         Args:
-            group_on (list[str]): Columns in obs used to define groups.
+            group_on (list[str]): Columns in obs used to define groups, if None or [] it will fully collapse the data.
             method (callable): Aggregation function for the main X matrix.
             metrics (dict[str, callable]): Additional named aggregation functions stored as layers.
             data_cols (list[str]): Observation columns to aggregate with each method.
@@ -262,6 +274,71 @@ class PhotometryData:
         )
         return new_obj
     
+    def get_window_idxs(
+            self, 
+            series: np.ndarray, 
+            centers: np.ndarray, 
+            bounds: Tuple[int, int], 
+            freq: float
+            ) -> np.ndarray:
+        """
+        Get indexs for windows centered around ``centers``.
+        Args:
+            series (np.ndarray): Time-like sorted series that windows will be calculated in.
+            centers (np.ndarray): The specified centers of the windows in same units as ``series``.
+            bounds (np.ndarray): Specify the lower and upper bounds of the windows.
+            freq (float): The frequency of ``series``.
+        Returns:
+            2D np.ndarray of window indexes.
+        """
+        low, high = bounds
+        left_idxs = np.searchsorted(series, centers + low, side='left')
+
+        # calculate minimum window size to ensure stable sizes
+        target_len = np.floor((bounds[1] - bounds[0]) * freq).astype(int)
+        window_idxs = left_idxs[:, None] + np.arange(target_len)[None, :]
+        return window_idxs
+
+    def window(
+        self,
+        series: np.ndarray,
+        centers: np.ndarray | float | int,
+        bounds: Tuple[float, float],
+        freq: float,
+        event_cols: List[str] | None = None,
+        ) -> "PhotometryData":
+        """
+        Return new PhotometryData object whose time series has been windowed.
+        Args:
+            series (np.ndarray): Time-like sorted series that windows will be calculated in.
+            centers (np.ndarray): The specified centers of the windows in same units as ``series``.
+            bounds (np.ndarray): Specify the lower and upper bounds of the windows.
+            freq (float): The frequency of ``series``.
+            event_cols (list[str]): Columns of self.adata.obs to be centered to ``centers``.
+        Returns:
+            2D np.ndarray of window indexes.
+        """
+        if isinstance(centers, (float, int)): 
+            centers = np.full(shape=self.X.shape[0], fill_value=centers, dtype=float)
+        series = np.asarray(series)
+        centers = np.asarray(centers)
+
+        window_idxs = self.get_window_idxs(series=series, centers=centers, bounds=bounds, freq=freq)
+
+        data = self.adata.X[np.arange(self.X.shape[0])[:, None], window_idxs]
+        time_points = reconstruct_time_points(bounds=bounds, freq=freq)
+        obs = self.adata.obs.copy()
+        if event_cols is not None:
+            obs[event_cols] = obs[event_cols] - centers[:, None]
+
+        out: "PhotometryData" = PhotometryData.from_arrays(
+            obs=obs,
+            data=data,
+            time_points=time_points,
+            metadata=self.adata.uns,
+        )
+        return out
+    
     # --- plotting ---
     def plot_line(
             self, i: int, 
@@ -269,7 +346,7 @@ class PhotometryData:
             label_with: List[str] | None = None, 
             err_layer: str | None = None,
             **kwargs
-            ) -> None:
+        ) -> None:
         """
         Plot a single trial time-series with optional error band.
         Args:
@@ -460,6 +537,29 @@ class PhotometryExperiment:
         self.frequency = None
         self.time = None
         self.trial_data = None
+
+    @classmethod
+    def manual_init(
+        cls, 
+        raw_signal: np.ndarray,
+        raw_isosbestic: np.ndarray,
+        time: np.ndarray,
+        frequency: float,
+        events: dict = {},
+        metadata: dict = {},
+    ) -> "PhotometryExperiment":
+        obj = PhotometryExperiment(
+            event_labels=list(events.keys()),
+            data_folder=None, box=None, signal_label=None, 
+            isosbestic_label=None, notes_filename=None
+        )
+        obj.raw_signal = raw_signal
+        obj.raw_isosbestic = raw_isosbestic
+        obj.time = time
+        obj.frequency = frequency
+        obj.events = events
+        obj.metadata = metadata
+        return obj
                 
     # --- pipeline API ---
     def run_pipeline(self) -> None:
@@ -512,7 +612,10 @@ class PhotometryExperiment:
     def preprocess_signal(self,
                           cutoff_frequency: float = 30.0, 
                           order: int = 4,
-                          method: str = 'dF/F'
+                          method: Literal['dF/F', 'dF'] = 'dF/F',
+                          normalization: Literal['nullZ', 'none'] = 'nullZ',
+                          c: float = 3,
+                          maxiter: int = 200,
                           ) -> None:
         """
         Low-pass filter and preprocess the signal using isosbestic fitting.
@@ -520,6 +623,9 @@ class PhotometryExperiment:
             cutoff_frequency (float): Low-pass cutoff frequency in Hz.
             order (int): Butterworth filter order.
             method (str): Preprocessing method, either 'dF/F' or 'dF'.
+            normalization (str): Method for whole signal normalization.
+            c (float): Constant for IRLS fits, smaller values mean more agressive downweighting.
+                1.4 <= c <= 3 is recommended. 
         Returns:
             None
         """
@@ -534,7 +640,7 @@ class PhotometryExperiment:
         filt_sig = filt_sig[:min_len]
         filt_iso = filt_iso[:min_len]
 
-        fitted_iso, r2_val, coeff = self.fit_isosbestic_to_signal_IRLS(filt_sig, filt_iso)
+        fitted_iso, r2_val, coeff = self.fit_isosbestic_to_signal_IRLS(filt_sig, filt_iso, c, maxiter)
         self.metadata['signal_processing_method'] = method 
         self.metadata['isosbestic_fit'] = {'r2_val' : r2_val,
                                            'coeffs' : coeff}
@@ -543,12 +649,20 @@ class PhotometryExperiment:
         avaliable_methods = ['dF/F', 'dF']
         match method:
             case 'dF':
-              self.signal = (filt_sig - fitted_iso)
+                self.signal = (filt_sig - fitted_iso)
             case 'dF/F':
                 self.signal = (filt_sig - fitted_iso) / np.maximum(fitted_iso, np.finfo(np.float32).eps)
             case _:
                 raise ValueError(f'Preprocessing method {method} not avaliable\n'
                                  f'Avalible methods are {avaliable_methods}')
+
+        match normalization:
+            case 'nullZ':
+                self.signal = self.signal / np.std(self.signal)
+            case 'none':
+                pass
+            case _:
+                raise ValueError(f'Whole signal normalization method {normalization} not recognized.')
 
         self.signal = self.signal.astype(np.float32, copy=False)
         return
@@ -574,12 +688,14 @@ class PhotometryExperiment:
         sos = butter(order, normalized_frequency, btype='low', output='sos') 
         return sosfiltfilt(sos, signal, axis=0, padtype='odd', padlen=None)
     
-    def fit_isosbestic_to_signal_IRLS(self, signal: np.ndarray, isosbestic: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray]:
+    def fit_isosbestic_to_signal_IRLS(self, signal: np.ndarray, isosbestic: np.ndarray, c: float, maxiter: int) -> Tuple[np.ndarray, float, np.ndarray]:
         """
         Fit the isosbestic channel to the signal using IRLS.
         Args:
             signal (np.ndarray): Filtered signal trace.
             isosbestic (np.ndarray): Filtered isosbestic trace.
+            c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
+                1.4 <= c <= 3 is recommended. 
         Returns:
             tuple[np.ndarray, float, np.ndarry]: Fitted isosbestic, R² value, and fit coefficients.
         """
@@ -589,8 +705,9 @@ class PhotometryExperiment:
         # add intercept
         X = sm.add_constant(x)  
 
-        model = sm.RLM(endog=y, exog=X, M=sm.robust.norms.TukeyBiweight())
-        res = model.fit()
+        model = sm.RLM(endog=y, exog=X, M=sm.robust.norms.TukeyBiweight(c=c))
+        res = model.fit(maxiter=maxiter)
+        sm.RLM
         fitted_isosbestic = res.fittedvalues.astype(np.float32, copy=False)
         r2_val = r2_score(signal, fitted_isosbestic)
         return fitted_isosbestic, r2_val, res.params
@@ -652,9 +769,9 @@ class PhotometryExperiment:
         align_to: str,
         center_on: list[str],
         trial_bounds: list[float, float],
-        baseline_bounds: list[float, float],
-        event_tolerences: Dict[str, Tuple[float, float]],
-        normalization: Literal['zscore', 'zero', 'none'] = 'zscore',
+        baseline_bounds: list[float, float] | None = None,
+        event_tolerences: Dict[str, Tuple[float, float]] = {},
+        normalization: Literal['zscore', 'zero', 'none'] = 'none',
         check_overlap: bool = True,
         time_error_threshold: float = 0.01,
     ) -> None:
@@ -666,7 +783,7 @@ class PhotometryExperiment:
             trial_bounds (list[float, float]): Trial window bounds relative to ``center_on`` events.
             baseline_bounds (list[float, float]): Baseline window bounds relative to ``align_to`` event.
             event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation, relative to ``align_to``.
-            normalization (Literal['zscore', 'zero']): Normalization method for trial signals based on baselines.
+            normalization (Literal['zscore', 'zero', 'none']): Normalization method for trial signals based on baselines.
             check_overlap (bool): Whether to throw an error multiple ``center_on`` events are found in the same trial.
             time_error_threshold (float): Maximum allowed mean timing error.
         Returns:
@@ -680,6 +797,12 @@ class PhotometryExperiment:
         if align_events.size == 0: raise ValueError(f"No '{align_to}' events found.")
         missing = [lab for lab in center_on if lab not in self.events]
         if missing: raise KeyError(f"center_on labels not found in events: {missing}")
+        if baseline_bounds is None:
+            calc_baselines = False
+            if normalization != None:
+                raise ValueError(f'Baseline bounds have to be specified to for normalization method {normalization}')
+        else:
+            calc_baselines = True
         
         # annotate events based on tolerences
         events_selected = self.annotate_intervals(
@@ -707,13 +830,14 @@ class PhotometryExperiment:
             centers=trial_window_centers,
             bounds=trial_bounds
         )
-        baseline_signals, baseline_times, baseline_events = self.create_windows(
-            signal=self.signal,
-            time=self.time,
-            events=events_selected,
-            centers=baseline_window_centers,
-            bounds=baseline_bounds
-        )
+        if calc_baselines:
+            baseline_signals, baseline_times, baseline_events = self.create_windows(
+                signal=self.signal,
+                time=self.time,
+                events=events_selected,
+                centers=baseline_window_centers,
+                bounds=baseline_bounds
+            )
 
         # apply trial-wise normalization method
         match normalization:
@@ -728,17 +852,31 @@ class PhotometryExperiment:
         
         # reconstruct times for consistency
         trial_time_points = reconstruct_time_points(trial_bounds, self.frequency)
-        baseline_time_points = reconstruct_time_points(baseline_bounds, self.frequency)
+        if calc_baselines:
+            baseline_time_points = reconstruct_time_points(baseline_bounds, self.frequency)
 
         # save trial data
         self.trial_signals = trial_signals
         self.trial_time_points = trial_time_points
         self.trial_events = trial_events
         self.raw_trial_signal = raw_trial_signals
+        self.trial_data = PhotometryData.from_arrays(
+            obs=pd.DataFrame(trial_events),
+            data=trial_signals,
+            time_points=trial_time_points,
+            metadata=self.metadata,
+        )
 
-        self.baseline_signals = baseline_signals
-        self.baseline_time_points = baseline_time_points
-        self.baseline_events = baseline_events
+        if calc_baselines:
+            self.baseline_signals = baseline_signals
+            self.baseline_time_points = baseline_time_points
+            self.baseline_events = baseline_events
+            self.baseline_data = PhotometryData.from_arrays(
+                obs=pd.DataFrame(baseline_events),
+                data=baseline_signals,
+                time_points=baseline_time_points,
+                metadata=self.metadata,
+            )
 
         # check error in times
         time_err = trial_times.std(axis=0).mean()
@@ -813,14 +951,12 @@ class PhotometryExperiment:
             tuple[np.ndarray, np.ndarray, dict]: Signal windows, centered time windows, and centered events.
         """        
         # find target window bounds
-        intervals = self.find_interval_bounds(series=time, centers=centers, bounds=bounds)
-        window_idxs = [np.arange(left, right+1) for left, right in intervals]
+        low, high = bounds
+        left_idxs = np.searchsorted(time, centers + low, side='left')
 
-        # calculate minimum window size to ensure stable sizes across experiments with the same freq and bounds
+        # calculate minimum window size to ensure stable sizes
         target_len = np.floor((bounds[1] - bounds[0]) * self.frequency).astype(int)
-        minimum_len = min(map(len, window_idxs))
-        assert minimum_len >= target_len
-        window_idxs = [arr[:target_len] for arr in window_idxs]
+        window_idxs = left_idxs[:, None] + np.arange(target_len)[None, :]
 
         # slice and stack + center time and events
         signal_windows = signal[window_idxs]

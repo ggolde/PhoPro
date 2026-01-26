@@ -2,7 +2,7 @@
 
 **Python package for processing TDT fiber photometry data**
 
-`pyFiberPhotometry` provides a framework for loading, preprocessing, annotating, and analyzing behavior-coupled fiber photometry datasets collected using Tucker-Davis Technologies (TDT) acquisition systems.
+`pyFiberPhotometry` provides a framework for processing, annotating, and analyzing behavior-coupled fiber photometry datasets collected using Tucker-Davis Technologies (TDT) acquisition systems.
  Built around two core classes that are subclassed for specific pipeline implementations.
  PhotometryData holds trial-wise data in an AnnData format.
  PhotometryExperiment extracts and processes signals and event timestamps from TDT folders, yeilding PhotometryData.
@@ -25,26 +25,62 @@ pip install git+https://github.com/ggolde/pyFiberPhotometry.git
 ### **Load and preprocess a TDT fiber photometry session**
 
 ```python
-from pyFiberPhotometry import RDT_PhotometryExperiment
+import numpy as np
+from pyFiberPhotometry import PhotometryExperiment, SimulatedPhotometryGenerator
 
-exp = RDT_PhotometryExperiment(
+# read data from TDT folder
+exp = PhotometryExperiment(
     data_folder="path/to/TDT/block",
     box="A",
 )
 
-exp.run_pipeline(
-    downsample=10,
-    preprocess_method="dF/F",
+# or create simulated data
+sim = SimulatedPhotometryGenerator(
+    T_sec=1000,
+    fs=30,
+    n_events=50,
+    seed=43546
+)
+exp = sim.to_PhotometryExperiment()
+
+# process signal
+exp.preprocess_signal(
+    cutoff_frequency=2,
+    order=4,
+    method='dF/F',
+    normalization='nullZ',
+    c=1.4,
+)
+# extract trials
+exp.extract_trial_data(
+    align_to='event',
+    center_on=['event'],
+    trial_bounds=(0, 3),
+    baseline_bounds=(-3, 0),
+    event_tolerences={},
+    normalization='none',
+    check_overlap=False,
+)
+# get trial data in PhotometryData format
+trials = exp.trial_data
+
+# average data
+avg = trials.collapse(
+    group_on=None,
+    method=np.nanmean,
+    metrics={'std': np.std},
+    data_cols=['event'],
+    count_col='n_trials'
 )
 
-trials = exp.trials
-baselines = exp.baselines
+# save data
+trials.write_h5ad('example.h5ad')
 ```
 
 ### **Plot a trial**
 
 ```python
-trials.plot_line(0, label_with=["trial_label", "block"])
+trials.plot_line(0)
 ```
 
 ---
