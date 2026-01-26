@@ -108,7 +108,7 @@ class PhotometryData:
         """     
         self.adata.write_zarr(path)
 
-    def append_on_disk_h5ad(self, path: str, uns_merge: str = 'first') -> None:
+    def append_on_disk_h5ad(self, path: str, join: str = 'inner', merge: str = 'same', uns_merge: str = 'first') -> None:
         """
         Append this object's data to an existing .h5ad file on disk or create it if it does not exist.
         Args:
@@ -133,8 +133,8 @@ class PhotometryData:
                 in_files=[tmp_path_old, tmp_path_new],
                 out_file=path,
                 axis='obs',
-                join='inner',
-                merge='same',
+                join=join,
+                merge=merge,
                 uns_merge=uns_merge,
             )
         except Exception as e:
@@ -211,24 +211,36 @@ class PhotometryData:
         return obs_agg, X_agg
 
     # --- operations ---
-    def combine_obj(self, to_append: "PhotometryData" | List["PhotometryData"], inplace: bool = False) -> None | PhotometryData:
+    def combine_obj(self, to_append: "PhotometryData" | List["PhotometryData"], inplace: bool = False, join: str = 'inner', merge: str ='same', uns_merge: str = 'same') -> None | PhotometryData:
         """
         Concatenate the rows of object with one or more PhotometryData objects.
         Args:
             to_append (PhotometryData | list[PhotometryData]): Object(s) to append.
             inplace (bool) : Whether to modify the original object or return new merged one.
+            join (str) : How to align values when concatenating. If "outer", the union of the other axis is taken. If "inner", the intersection.
+            merge (str) : How elements not aligned to the axis being concatenated along are selected. Currently implemented strategies include:
+                None: No elements are kept.
+                'same': Elements that are the same in each of the objects.
+                'unique': Elements for which there is only one possible value.
+                'first': The first element seen at each from each position.
+                'only': Elements that show up in only one of the objects.
+            uns_merge (str) : How the elements of `.uns` are selected. Uses the same set of strategies as the merge argument, except applied recursively.
         Returns:
             Combined PhotometryData or None depending on ``inplace``.
         """        
         if not isinstance(to_append, list):
             to_append = [to_append]
+
         adatas = [getattr(self, 'adata')] + [getattr(obj, 'adata') for obj in to_append]
+        for i in range(len(adatas)):
+            adatas[i].obs = adatas[i].obs.infer_objects()
+
         merged_adata = ad.concat(
             adatas=adatas,
             axis='obs',
-            join='inner',
-            merge='same',
-            uns_merge='same',
+            join=join,
+            merge=merge,
+            uns_merge=uns_merge,
             index_unique=''
         )
         merged_adata.obs.reset_index(drop=True, inplace=True)

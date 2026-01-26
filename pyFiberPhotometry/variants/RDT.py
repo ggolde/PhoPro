@@ -366,14 +366,14 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
             'aligned' : align_to,
             'lower_bound' : trial_bounds[0],
             'upper_bound' : trial_bounds[1],
-            'frquency' : self.frequency,
+            'frequency' : self.frequency,
             'normalization' : normalization,
         }
         baseline_metadata = {
             'aligned' : align_to,
             'lower_bound' : baseline_bounds[0],
             'upper_bound' : baseline_bounds[1],
-            'frquency' : self.frequency,
+            'frequency' : self.frequency,
             'normalization' : normalization,
         }
 
@@ -481,6 +481,7 @@ def RDT_process_whole_directory(
     fit_photobleaching: bool = True,
     save_baselines: bool = True,
     save_dashboards: Literal[True, False, 'on_poor_signal'] = False,
+    low_memory_mode: bool = False,
 
     trial_data_file: str = 'trials.h5ad',
     baseline_data_file: str = 'baselines.h5ad',
@@ -506,6 +507,8 @@ def RDT_process_whole_directory(
         save_baselines (bool) : Whether to save trial-wise baseline data.
         save_dashboards (Literal[True, False, 'on_poor_signal']) : Whether to save graphical dashboard for each experiment, 
             or only on experiments flagged as having poor signal.
+        low_memory_mode (bool) : If True concats every experiment to a file on disk to save memory.
+            If False concatination happens in memory.
 
         trial_data_file (str) : Name for trial data output file.
         baseline_data_file (str) : Name for baseline data output file.
@@ -558,7 +561,6 @@ def RDT_process_whole_directory(
     for tdt_folder in tdt_folders_list:
         for box in boxes:
             log.info(f"Processing {tdt_folder}, box {box} ({i} / {n_experiments})...")
-            i += 1
             try: 
                 exp = RDT_PhotometryExperiment(
                     tdt_folder, 
@@ -575,13 +577,29 @@ def RDT_process_whole_directory(
 
                 if exp.poorSignalFlag:
                     n_poorSignal += 1
-                    
-                log.info(f"Saving trial data...")
-                exp.trials.append_on_disk_h5ad(path=str(trial_data_path))
+                
+                if low_memory_mode:
+                    log.info(f"Saving trial data...")
+                    exp.trials.append_on_disk_h5ad(path=str(trial_data_path))
+                else:
+                    if i == 1:
+                        log.info(f"Creating first trial object...")
+                        trial_data = PhotometryData(exp.trials.adata.copy())
+                    else:
+                        log.info(f"Appending to trial_data object...")
+                        trial_data.combine_obj(exp.trials, inplace=True)
 
                 if save_baselines:
-                    log.info(f"Saving baseline data...")
-                    exp.baselines.append_on_disk_h5ad(path=str(baseline_data_path))
+                    if low_memory_mode:
+                        log.info(f"Saving baseline data...")
+                        exp.baselines.append_on_disk_h5ad(path=str(baseline_data_path))
+                    else:
+                        if i == 1:
+                            log.info(f"Creating first baseline object...")
+                            baseline_data = PhotometryData(exp.baselines.adata.copy())
+                        else:
+                            log.info(f"Appending to baseline_data object...")
+                            baseline_data.combine_obj(exp.baselines, inplace=True)
 
                 if fit_photobleaching:
                     log.info(f"Fitting & saving photobleaching curve...")
@@ -601,10 +619,12 @@ def RDT_process_whole_directory(
                 log.info(exp.trials.info())
                 
                 del exp
+                i += 1
 
             except Exception as e:
                 n_errors += 1
                 log.error(f"Error processing {tdt_folder}, box {box}: \n\t {e}\n")
+                i += 1
                 continue
     
     log.info(f'Data processing complete with {n_errors} errors '
@@ -612,7 +632,10 @@ def RDT_process_whole_directory(
              f'{n_experiments} experiments')
 
     log.info(f'Reseting index of trial data...')
-    trial_data = RDT_PhotometryData.read_h5ad(trial_data_path)
+    if low_memory_mode:
+        trial_data = RDT_PhotometryData.read_h5ad(trial_data_path)
+    elif save_baselines:
+        baseline_data.write_h5ad(baseline_data_path)
     trial_data.adata.obs.reset_index(drop=True, inplace=True)
     trial_data.adata.obs.index = trial_data.adata.obs.index.astype(str)
     trial_data.write_h5ad(trial_data_path)
