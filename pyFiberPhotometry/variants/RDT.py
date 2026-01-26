@@ -186,7 +186,8 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
             f"{self.metadata.get('rat', 'UnknownRat')}_"
             f"{self.metadata.get('current', 'UnknownCurrent')}uA_"
             f"Box{self.box}_"
-            f"{self.metadata.get('stripped_date', 'UnknownDate')}"
+            f"{self.metadata.get('stripped_date', 'UnknownDate')}_"
+            f"{data_folder.split('-')[-1]}"
         )
         self.metadata['uid'] = self.id
                 
