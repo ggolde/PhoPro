@@ -217,8 +217,7 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         free_trial_slices: list[list[int]] = ((8, 28), (36, 56), (64, 84)),
         block_labels: list[str] = ("0%", "25%", "75%"),
         qc_drop: bool = False,
-        to_trim: list[str] = ['Lrg', 'Sml'],
-
+        to_trim: list[str] | None = None,
     ) -> None:
         """
         Run full RDT pipeline: extract, preprocess, window trials, label, QC, and optionally save.
@@ -297,7 +296,7 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
 
         # step 5: pass down important metadata
         self.trials.add_obs_columns(self.metadata, keys=['rat', 'box', 'current', 'date', 'uid'])
-        self.trials.drop_obs_columns(to_drop=to_trim)
+        if to_trim is not None: self.trials.drop_obs_columns(to_drop=to_trim)
         log.info(f"Done. {self.trials.n_trials} trials remain.")
 
         if self.poorSignalFlag:

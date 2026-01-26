@@ -497,7 +497,7 @@ class PhotometryData:
         Returns:
             None
         """        
-        self.adata.obs = self.adata.obs.drop(to_drop, errors='ignore')
+        self.adata.obs = self.adata.obs.drop(to_drop, errors='ignore', axis=1)
 
     def get_text_value_counts(self, col: str) -> str:
         """
