@@ -171,14 +171,14 @@ def _troendle_step_down(obs: np.ndarray, null: np.ndarray) -> np.ndarray:
     return _padj[valid_depths]
 
 def cluster_depth_test(
-    X: np.ndarray,
-    Y: np.ndarray,
-    stat_func: callable = t_test,
-    thres_func: callable = t_thresh,
-    n_perm: int = 2000,
-    p_threshold: int = 0.05,
-    n_jobs: int = 1,
-    random_state: int | None = 42,
+        X: np.ndarray,
+        Y: np.ndarray,
+        stat_func: callable = t_test,
+        thres_func: callable = t_thresh,
+        n_perm: int = 2000,
+        p_threshold: int = 0.05,
+        n_jobs: int = 1,
+        random_state: int | None = 42,
     ) -> Dict[str, Any]:
     # validate inputs
     X = np.asarray(X, float)

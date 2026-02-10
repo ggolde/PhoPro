@@ -211,6 +211,26 @@ class PhotometryData:
         return obs_agg, X_agg
 
     # --- operations ---
+    def downsample(self, factor: int) -> "PhotometryData":
+        X_new = downsample_ndarray(self.adata.X, factor=factor, axis=1)
+        t_new = downsample_1d(self.var['t'].to_numpy(), factor=factor)
+        layers_new = {k : downsample_ndarray(v, factor=factor, axis=1) for k, v in self.adata.layers.items()}
+        metadata = self.uns.copy()
+        freq_cur = metadata.get('frequency', None)
+        if freq_cur is not None: 
+            freq_new = freq_cur / factor
+            metadata.update({'frequency': freq_new})
+
+        return PhotometryData.from_arrays(
+            obs=self.obs,
+            data=X_new,
+            time_points=t_new,
+            layers=layers_new,
+            metadata=metadata,
+        )
+
+
+
     def combine_obj(self, to_append: "PhotometryData" | List["PhotometryData"], inplace: bool = False, join: str = 'inner', merge: str ='same', uns_merge: str = 'same') -> None | PhotometryData:
         """
         Concatenate the rows of object with one or more PhotometryData objects.
@@ -357,7 +377,7 @@ class PhotometryData:
             ax: Axes | None = None, 
             label_with: List[str] | None = None, 
             err_layer: str | None = None,
-            **kwargs
+            plt_kwargs: dict = {},
         ) -> None:
         """
         Plot a single trial time-series with optional error band.
@@ -383,7 +403,7 @@ class PhotometryData:
         else:
             label = None
 
-        ax.plot(x, y, label=label)
+        ax.plot(x, y, label=label, **plt_kwargs)
         if err_layer is not None:
             yerr = self.adata.layers[err_layer][i]
             ax.fill_between(x, y + yerr, y - yerr, alpha=0.3)
@@ -395,7 +415,7 @@ class PhotometryData:
             title: str = None, 
             label_with: List[str] = None, 
             err_layer: str = None, 
-            **kwargs
+            plt_kwargs: dict = {},
             ) -> None:
         """
         Plot a set of trials given a boolean or index subset.
@@ -412,7 +432,7 @@ class PhotometryData:
         idxs = np.arange(self.n_trials)[subset]
         if ax is None: fig, ax = plt.subplots()
         for i in idxs:
-            self.plot_line(i, ax=ax, label_with=label_with, err_layer=err_layer)
+            self.plot_line(i, ax=ax, label_with=label_with, err_layer=err_layer, plt_kwargs=plt_kwargs)
         if label_with is not None: plt.legend()
         if title is not None: ax.set_title(title)
 
@@ -424,7 +444,9 @@ class PhotometryData:
             save_dir: str | None = None,
             save_ext: str = '.png',
             save_dpi: int = 140, 
-            **kwargs):
+            plt_kwargs: dict = {},
+            ax = None,
+            ):
         """
         Plot trials grouped by observation columns.
         Args:
@@ -442,7 +464,7 @@ class PhotometryData:
         for gkey, idxs in groups.items():
             if not isinstance(gkey, tuple): gkey=[gkey]
             title = ', '.join([f'{name}: {val}' for name, val in zip(group_on, gkey)])
-            self.plot_set(subset=idxs, label_with=label_with, title=title, err_layer=err_layer, **kwargs)
+            self.plot_set(subset=idxs, label_with=label_with, title=title, err_layer=err_layer, plt_kwargs=plt_kwargs, ax=ax)
             if save_dir is not None:
                 file_name = '_'.join([f'{name}-{val}' for name, val in zip(group_on, gkey)]) + save_ext
                 plt.savefig(os.path.join(save_dir, file_name), dpi=save_dpi)
