@@ -54,7 +54,7 @@ class RDT_PhotometryData(PhotometryData):
         block_ends = [0] + [hi for (_, hi) in free_trial_slices]
         block_slices = [(block_ends[i], block_ends[i + 1]) for i in range(len(block_ends) - 1)]
         
-        obs = self.adata.obs
+        obs = self.obs
         obs["block"] = pd.Series(index=obs.index, dtype="object")
         obs["block_num"] = pd.Series(index=obs.index, dtype="int64")
         obs["forced"] = True
@@ -76,7 +76,7 @@ class RDT_PhotometryData(PhotometryData):
         Returns:
             None
         """        
-        obs = self.adata.obs
+        obs = self.obs
         obs["trial_label"] = pd.Series(index=obs.index, dtype="object")
 
         is_sml = obs.get("Sml", pd.Series(index=obs.index)).notna()
@@ -139,7 +139,7 @@ class RDT_PhotometryData(PhotometryData):
         }
         return summary
 
-    def info(self, info_on: list[str] = ['rat', 'trial_label', 'block', 'current', 'forced', 'poorSignalFlag']) -> None:
+    def info(self, info_on: list[str] = ['rat', 'trial_label', 'block', 'current', 'forced', 'poorSignalFlag']) -> str:
         """
         Build a simple string summary of key obs columns.
         Args:
@@ -165,7 +165,7 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         signal_label: str = "_465",
         isosbestic_label: str = "_405",
         annot_filename: str = "annotations.json",
-    ) -> "RDT_PhotometryExperiment":
+        ):
         """
         Initialize an RDT_PhotometryExperiment with TDT and RDT settings.
         Args:
@@ -218,7 +218,7 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         block_labels: list[str] = ("0%", "25%", "75%"),
         qc_drop: bool = False,
         to_trim: list[str] | None = None,
-    ) -> None:
+        ) -> None:
         """
         Run full RDT pipeline: extract, preprocess, window trials, label, QC, and optionally save.
         Args:
@@ -305,7 +305,7 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         log.info(f"Pipeline complete.")
 
     # --- trial windowing ---
-    def extract_trial_data(
+    def extract_trial_data( # type: ignore
         self,
         align_to: str = 'Hsl',
         center_on: list[str] = ['Lrg', 'Sml'],
@@ -556,6 +556,9 @@ def RDT_process_whole_directory(
     n_errors = 0
     i = 1    
 
+    trial_data: RDT_PhotometryData = None
+    baseline_data: RDT_PhotometryData = None
+
     # loop through every TDT folder add box
     for tdt_folder in tdt_folders_list:
         for box in boxes:
@@ -583,7 +586,7 @@ def RDT_process_whole_directory(
                 else:
                     if i == 1:
                         log.info(f"Creating first trial object...")
-                        trial_data = PhotometryData(exp.trials.adata.copy())
+                        trial_data = RDT_PhotometryData(exp.trials.adata.copy())
                     else:
                         log.info(f"Appending to trial_data object...")
                         trial_data.combine_obj(exp.trials, inplace=True)
@@ -595,7 +598,7 @@ def RDT_process_whole_directory(
                     else:
                         if i == 1:
                             log.info(f"Creating first baseline object...")
-                            baseline_data = PhotometryData(exp.baselines.adata.copy())
+                            baseline_data = RDT_PhotometryData(exp.baselines.adata.copy())
                         else:
                             log.info(f"Appending to baseline_data object...")
                             baseline_data.combine_obj(exp.baselines, inplace=True)
@@ -637,8 +640,8 @@ def RDT_process_whole_directory(
         log.info(f"Saving baseline curve...")
         baseline_data.write_h5ad(baseline_data_path)
     log.info(f'Reseting index of trial data...')
-    trial_data.adata.obs.reset_index(drop=True, inplace=True)
-    trial_data.adata.obs.index = trial_data.adata.obs.index.astype(str)
+    trial_data.obs.reset_index(drop=True, inplace=True)
+    trial_data.obs.index = trial_data.obs.index.astype(str)
     trial_data.write_h5ad(trial_data_path)
     log.info(f'All done!')
     return trial_data

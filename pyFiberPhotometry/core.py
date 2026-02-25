@@ -1,6 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, List, Callable, Tuple, Literal
-from matplotlib.axes import Axes
+from typing import Dict, Any, List, Callable, Tuple, Literal, Protocol, MutableMapping, cast
 from anndata.experimental import concat_on_disk
 from scipy.optimize import curve_fit
 from scipy.signal import butter, sosfiltfilt
@@ -8,6 +7,7 @@ import statsmodels.api as sm
 from sklearn.metrics import r2_score, mean_squared_error
 
 import matplotlib.pyplot as plt
+import matplotlib.axes
 import anndata as ad
 import numpy as np
 import pandas as pd
@@ -17,6 +17,8 @@ import os
 from .utils import *
 from .io import *
 
+ad.settings.allow_write_nullable_strings = True
+
 class PhotometryData:
     """
     Wrap an AnnData object for trial-wise photometry time-series data.
@@ -24,7 +26,7 @@ class PhotometryData:
     adata: ad.AnnData
 
     # --- constructors ---
-    def __init__(self, adata):
+    def __init__(self, adata: ad.AnnData):
         """
         Initialize a PhotometryData wrapper from an AnnData object.
         Args:
@@ -148,15 +150,15 @@ class PhotometryData:
 
     # --- convenience views ---
     @property
-    def X(self) -> np.ndarray: return self.adata.X
+    def X(self) -> np.ndarray: return cast(np.ndarray, self.adata.X)
     @property
     def ts(self) -> np.ndarray: return self.adata.var["t"].to_numpy()
     @property
-    def obs(self) -> pd.DataFrame: return self.adata.obs
+    def obs(self) -> pd.DataFrame: return cast(pd.DataFrame, self.adata.obs)
     @property
-    def var(self) -> pd.DataFrame: return self.adata.var
+    def var(self) -> pd.DataFrame: return cast(pd.DataFrame, self.adata.var)
     @property
-    def uns(self) -> dict: return self.adata.uns
+    def uns(self) -> dict: return dict(self.adata.uns)
     @property
     def n_trials(self) -> int: return self.adata.n_obs
     @property
@@ -181,7 +183,7 @@ class PhotometryData:
             tuple[pd.DataFrame, np.ndarray]: Aggregated obs and X arrays.
         """
         X = np.asarray(self.adata.X)
-        obs = self.adata.obs
+        obs: pd.DataFrame = self.adata.obs
 
         if group_on is None or len(group_on) == 0:
             new_cols = data_cols if count_col is None else [count_col] + data_cols
@@ -263,7 +265,7 @@ class PhotometryData:
             uns_merge=uns_merge,
             index_unique=''
         )
-        merged_adata.obs.reset_index(drop=True, inplace=True)
+        merged_adata.obs.reset_index(drop=True, inplace=True) # type: ignore
         if inplace:
             self.adata = merged_adata
             return
@@ -274,7 +276,7 @@ class PhotometryData:
             self,
             group_on: List[str] | None,
             method: function = np.nanmean,
-            metrics: Dict[str : function] = {},
+            metrics: Dict[str, function] = {},
             data_cols: list[str] = [],
             count_col: str | None = 'n'
             ) -> "PhotometryData":
@@ -357,7 +359,7 @@ class PhotometryData:
 
         window_idxs = self.get_window_idxs(series=series, centers=centers, bounds=bounds, freq=freq)
 
-        data = self.adata.X[np.arange(self.X.shape[0])[:, None], window_idxs]
+        data = self.X[np.arange(self.X.shape[0])[:, None], window_idxs]
         time_points = reconstruct_time_points(bounds=bounds, freq=freq)
         obs = self.adata.obs.copy()
         if event_cols is not None:
@@ -374,7 +376,7 @@ class PhotometryData:
     # --- plotting ---
     def plot_line(
             self, i: int, 
-            ax: Axes | None = None, 
+            ax: matplotlib.axes.Axes | None = None, 
             label_with: List[str] | None = None, 
             err_layer: str | None = None,
             plt_kwargs: dict = {},
@@ -392,9 +394,9 @@ class PhotometryData:
         """        
         if ax is None: fig, ax = plt.subplots()
         
-        x = self.adata.var['t'].to_numpy()
-        y = self.adata.X[i, :]
-        row = self.adata.obs.iloc[i]
+        x = self.var['t'].to_numpy()
+        y = self.X[i, :]
+        row = self.obs.iloc[i]
 
         if label_with is not None:
             vals = row[label_with].astype(str).to_list()
@@ -411,7 +413,7 @@ class PhotometryData:
     def plot_set(
             self, 
             subset: List[bool | int], 
-            ax: Axes = None,
+            ax: matplotlib.axes.Axes = None,
             title: str = None, 
             label_with: List[str] = None, 
             err_layer: str = None, 
@@ -460,7 +462,7 @@ class PhotometryData:
         Returns:
             None
         """        
-        groups = self.adata.obs.groupby(group_on).indices
+        groups = self.obs.groupby(group_on).indices
         for gkey, idxs in groups.items():
             if not isinstance(gkey, tuple): gkey=[gkey]
             title = ', '.join([f'{name}: {val}' for name, val in zip(group_on, gkey)])
@@ -471,11 +473,11 @@ class PhotometryData:
             plt.show()
 
     # --- convienience ---
-    def filter_rows(self, mask: np.ndarray[bool], inplace: bool = False) -> None | "PhotometryData":
+    def filter_rows(self, mask: np.ndarray, inplace: bool = False) -> "None | PhotometryData":
         """
         Filter rows (trials) using a boolean mask.
         Args:
-            mask (np.ndarray[bool]): Boolean array of length n_trials.
+            mask (np.ndarray): Boolean array of length n_trials.
             inplace (bool): If True, modify in place. If False, return a new object.
         Returns:
             None | PhotometryData: New filtered object if inplace is False, else None.
@@ -519,7 +521,7 @@ class PhotometryData:
         Returns:
             None
         """        
-        self.adata.obs = self.adata.obs.drop(to_drop, errors='ignore', axis=1)
+        self.adata.obs = self.obs.drop(to_drop, errors='ignore', axis=1)
 
     def get_text_value_counts(self, col: str) -> str:
         """
@@ -533,6 +535,22 @@ class PhotometryData:
         return ", ".join(f"{k}: {v}" for k, v in vc.items())
 
 class PhotometryExperiment:
+    id: str
+    data_folder: str
+    notes_filename: str
+    box: str
+    signal_label: str
+    isosbestic_label: str
+    event_labels: List[str]
+
+    metadata: Dict[str, Any]
+    events: Dict[str, np.ndarray]
+    raw_signal: np.ndarray
+    raw_isosbestic: np.ndarray
+    frequency: float
+    time: np.ndarray
+    trial_data: "PhotometryData"
+
     """
     Handle extraction and preprocessing of raw photometry data from TDT folders.
     """
@@ -557,6 +575,7 @@ class PhotometryExperiment:
         Returns:
             None
         """        
+        self.id = 'label'
         self.data_folder = data_folder
         self.notes_filename = notes_filename
         self.box = box
@@ -566,11 +585,6 @@ class PhotometryExperiment:
 
         self.metadata = {}
         self.events = {}
-        self.raw_signal = None
-        self.raw_isosbestic = None
-        self.frequency = None
-        self.time = None
-        self.trial_data = None
 
     @classmethod
     def manual_init(
@@ -622,12 +636,12 @@ class PhotometryExperiment:
         iso = tdt_obj.streams[self.isosbestic_label + self.box].data
         fs = tdt_obj.streams[self.signal_label + self.box].fs
 
-        self.raw_signal = downsample_1d(np.asarray(sig, dtype=np.float32), factor=downsample)
-        self.raw_isosbestic = downsample_1d(np.asarray(iso, dtype=np.float32), factor=downsample)
+        self.raw_signal: np.ndarray = downsample_1d(np.asarray(sig, dtype=np.float32), factor=downsample)
+        self.raw_isosbestic: np.ndarray = downsample_1d(np.asarray(iso, dtype=np.float32), factor=downsample)
         self.frequency = float(fs) / downsample
 
         n = self.raw_signal.size
-        self.time = np.arange(n, dtype=float) / self.frequency
+        self.time: np.ndarray = np.arange(n, dtype=float) / self.frequency
 
         # extract event timestamps for requested labels
         self.events = {}
@@ -643,14 +657,15 @@ class PhotometryExperiment:
         del tdt_obj
 
     # --- signal processing ---
-    def preprocess_signal(self,
-                          cutoff_frequency: float = 30.0, 
-                          order: int = 4,
-                          method: Literal['dF/F', 'dF'] = 'dF/F',
-                          normalization: Literal['nullZ', 'none'] = 'nullZ',
-                          c: float = 3,
-                          maxiter: int = 200,
-                          ) -> None:
+    def preprocess_signal(
+            self,
+            cutoff_frequency: float = 30.0, 
+            order: int = 4,
+            method: Literal['dF/F', 'dF'] = 'dF/F',
+            normalization: Literal['nullZ', 'none'] = 'nullZ',
+            c: float = 3,
+            maxiter: int = 200,
+            ) -> None:
         """
         Low-pass filter and preprocess the signal using isosbestic fitting.
         Args:
@@ -686,17 +701,12 @@ class PhotometryExperiment:
                 self.signal = (filt_sig - fitted_iso)
             case 'dF/F':
                 self.signal = (filt_sig - fitted_iso) / np.maximum(fitted_iso, np.finfo(np.float32).eps)
-            case _:
-                raise ValueError(f'Preprocessing method {method} not avaliable\n'
-                                 f'Avalible methods are {avaliable_methods}')
 
         match normalization:
             case 'nullZ':
                 self.signal = self.signal / np.std(self.signal)
             case 'none':
                 pass
-            case _:
-                raise ValueError(f'Whole signal normalization method {normalization} not recognized.')
 
         self.signal = self.signal.astype(np.float32, copy=False)
         return
@@ -793,7 +803,7 @@ class PhotometryExperiment:
                'r2_val': r2_val, 'mse_val': mse_val}
         
         self.fitted_params = params
-        fitted_curve = fitted_curve.astype(np.float32, copy=False) if return_curve else None
+        fitted_curve: np.ndarray = fitted_curve.astype(np.float32, copy=False) if return_curve else None
 
         return pd.DataFrame([row]), fitted_curve
     
@@ -802,8 +812,8 @@ class PhotometryExperiment:
         self,
         align_to: str,
         center_on: list[str],
-        trial_bounds: list[float, float],
-        baseline_bounds: list[float, float] | None = None,
+        trial_bounds: Tuple[float, float],
+        baseline_bounds: Tuple[float, float] | None = None,
         event_tolerences: Dict[str, Tuple[float, float]] = {},
         normalization: Literal['zscore', 'zero', 'none'] = 'none',
         check_overlap: bool = True,
@@ -829,11 +839,13 @@ class PhotometryExperiment:
         # validate inputs
         if align_to not in self.events: raise KeyError(f"align_to '{align_to}' not found in events: {list(self.events)}")
         if align_events.size == 0: raise ValueError(f"No '{align_to}' events found.")
+
         missing = [lab for lab in center_on if lab not in self.events]
         if missing: raise KeyError(f"center_on labels not found in events: {missing}")
+
         if baseline_bounds is None:
             calc_baselines = False
-            if normalization != None:
+            if normalization in ['zscore', 'zero']:
                 raise ValueError(f'Baseline bounds have to be specified to for normalization method {normalization}')
         else:
             calc_baselines = True
@@ -872,6 +884,8 @@ class PhotometryExperiment:
                 centers=baseline_window_centers,
                 bounds=baseline_bounds
             )
+        else:
+            baseline_signals, baseline_times, baseline_events = None, None, None
 
         # apply trial-wise normalization method
         match normalization:
@@ -881,13 +895,14 @@ class PhotometryExperiment:
                 trial_signals = center_signal(raw_trial_signals, baseline_signals)
             case 'none':
                 trial_signals = raw_trial_signals
-            case _:
-                raise ValueError(f'Invalid normalization method ({normalization})')
         
         # reconstruct times for consistency
         trial_time_points = reconstruct_time_points(trial_bounds, self.frequency)
+
         if calc_baselines:
             baseline_time_points = reconstruct_time_points(baseline_bounds, self.frequency)
+        else:
+            baseline_time_points = None
 
         # save trial data
         self.trial_signals = trial_signals
@@ -1059,7 +1074,7 @@ class PhotometryExperiment:
         final_sig = downsample_1d(self.signal, downsample_factor)
         
         # raw and fitted signals
-        ax1: plt.Axes
+        ax1: matplotlib.axes.Axes
         ax1.plot(x, raw_sig, label='Raw Signal', c='#1f77b4')
         ax1.plot(x, raw_iso, label='Raw Iso.', c="#4B4B4B", alpha=0.9)
         ax1.plot(x, fit_iso, label='Fitted Iso.', c='#ff7f0e', alpha=0.9)
@@ -1068,7 +1083,7 @@ class PhotometryExperiment:
         ax1.legend()
 
         # processed signal
-        ax2: plt.Axes
+        ax2: matplotlib.axes.Axes
         y_pad_factor = 2.5
         middle_third = np.array_split(final_sig, 3)[1]
         y_high = np.max(middle_third)

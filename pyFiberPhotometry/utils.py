@@ -42,7 +42,7 @@ def downsample_ndarray(arr: np.ndarray, factor: int, axis: int = 1) -> np.ndarra
     arr = arr.reshape(new_shape).mean(axis=axis + 1)
     return arr
 
-def downsample_1d(arr, factor):
+def downsample_1d(arr: np.ndarray, factor: int) -> np.ndarray:
     """
     Downsample a 1D array by an integer factor using mean pooling with trimming.
     Args:
