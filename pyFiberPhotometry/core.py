@@ -358,17 +358,25 @@ class PhotometryData:
         centers = np.asarray(centers)
 
         window_idxs = self.get_window_idxs(series=series, centers=centers, bounds=bounds, freq=freq)
+        row_slice = np.arange(self.X.shape[0])[:, None]
 
-        data = self.X[np.arange(self.X.shape[0])[:, None], window_idxs]
+        data = self.X[row_slice, window_idxs]
+        layers = {}
+        for k, layer in self.adata.layers.items():
+            layers[k] = layer[row_slice, window_idxs]
+
         time_points = reconstruct_time_points(bounds=bounds, freq=freq)
         obs = self.adata.obs.copy()
         if event_cols is not None:
             obs[event_cols] = obs[event_cols] - centers[:, None]
 
+        
+
         out: "PhotometryData" = PhotometryData.from_arrays(
             obs=obs,
             data=data,
             time_points=time_points,
+            layers=layers,
             metadata=self.adata.uns,
         )
         return out
@@ -643,18 +651,30 @@ class PhotometryExperiment:
         n = self.raw_signal.size
         self.time: np.ndarray = np.arange(n, dtype=float) / self.frequency
 
+        self.events = self.extract_events(tdt_obj)
+        del tdt_obj
+
+    def extract_events(self, tdt_obj) -> dict:
+        """
+        Used by `self.extract_data` to get event timestamps.
+        Seperated so child classes can implement extracting events fron annotation files instead.
+        Args:
+            tdt_obj (tdt): Object from `tdt.read_block()`.
+        Returns:
+            dict
+        """
         # extract event timestamps for requested labels
-        self.events = {}
+        events = {}
         self.metadata['missing_events'] = []
         for label in self.event_labels:
             # some sessions may lack a label entirely if no events are recorded
             if hasattr(tdt_obj.epocs, self.box + label):
                 ep = tdt_obj.epocs[self.box + label]
-                self.events[label] = np.asarray(ep.onset)
+                events[label] = np.asarray(ep.onset)
             else:
-                self.events[label] = np.array([], dtype=float)
+                events[label] = np.array([], dtype=float)
                 self.metadata['missing_events'].append(label)
-        del tdt_obj
+        return events
 
     # --- signal processing ---
     def preprocess_signal(
