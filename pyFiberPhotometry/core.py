@@ -541,6 +541,66 @@ class PhotometryData:
         """
         vc = self.adata.obs[col].value_counts(dropna=False)
         return ", ".join(f"{k}: {v}" for k, v in vc.items())
+    
+    def trials_to_long_df(
+            self, 
+            layer: str | None = None,
+            err_layer: str | None = None,
+            obs_cols: list[str] | None = None, 
+            downsample: int | None = None,
+
+            ) -> pd.DataFrame:
+        '''
+        Translate trial data to long dataframe format. Mostly for graphing.
+
+        Parameters
+        ----------
+        layer : str | None, optional
+            Which layer to export, if none `self.X` used, by default None.
+        err_layer : str | None, optional
+            Which layer, if any, to add as an error col.
+        obs_cols : list[str] | None, optional
+            Which columns from `obs` to include, by default None.
+        downsample : int | None, optional
+            How much to downsample the time series data if at all, by default None.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing columns, trial_id, obs_cols specified, time_idx, signal, time, err_layer in long format.
+        '''
+        obj = self if downsample is None else self.downsample(downsample)
+        X = obj.adata.layers[layer] if layer is not None else obj.adata.X
+
+        def _make_wide(arr: np.ndarray, obj: PhotometryData, obs_cols: list[str] | None = None, value_name: str = 'signal') -> pd.DataFrame:
+                wide = pd.DataFrame(arr)
+                wide["trial_id"] = obj.adata.obs_names.to_numpy()
+
+                if obs_cols is not None:
+                    obs_tmp = obj.adata.obs[obs_cols].copy()
+                    obs_tmp["trial_id"] = obj.adata.obs_names.to_numpy()
+                    wide = wide.merge(obs_tmp, on="trial_id", how="left")
+
+                long_df = wide.melt(
+                    id_vars=["trial_id"] + ([] if obs_cols is None else obs_cols),
+                    var_name="time_idx",
+                    value_name=value_name,
+                )
+                return long_df      
+
+        long_signal = _make_wide(X, obj=obj, obs_cols=obs_cols)
+
+        long_signal["time_idx"] = long_signal["time_idx"].astype(int)
+        long_signal["time"] = obj.ts[long_signal["time_idx"]]
+
+        if err_layer is not None:
+            E = obj.adata.layers[err_layer]
+            long_err = _make_wide(E, obj=obj, obs_cols=None, value_name=err_layer)
+            long_signal = long_signal.join(long_err.filter([err_layer]), how='left')
+
+        long_signal.sort_values(['trial_id', 'time'], inplace=True)
+
+        return long_signal
 
 class PhotometryExperiment:
     id: str
@@ -835,7 +895,7 @@ class PhotometryExperiment:
         trial_bounds: Tuple[float, float],
         baseline_bounds: Tuple[float, float] | None = None,
         event_tolerences: Dict[str, Tuple[float, float]] = {},
-        normalization: Literal['zscore', 'zero', 'none'] = 'none',
+        normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] = 'none',
         check_overlap: bool = True,
         time_error_threshold: float = 0.01,
     ) -> None:
@@ -913,6 +973,10 @@ class PhotometryExperiment:
                 trial_signals = zscore_signal(raw_trial_signals, baseline_signals)
             case 'zero':
                 trial_signals = center_signal(raw_trial_signals, baseline_signals)
+            case 'mad':
+                trial_signals = mad_norm_signal(raw_trial_signals, baseline_signals)
+            case 'amp':
+                trial_signals = amp_norm_signal(raw_trial_signals, baseline_signals)
             case 'none':
                 trial_signals = raw_trial_signals
         

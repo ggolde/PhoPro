@@ -528,7 +528,7 @@ def RDT_process_whole_directory(
     # set up logger
     log = logging.getLogger(__name__)
     if log_file is not None:
-        logging.basicConfig(filename=log_file, filemode='w', level=logging.INFO)
+        logging.basicConfig(filename=log_file, filemode='w', level=logging.INFO, force=True)
 
     log.info("Starting data ripping process...")
 

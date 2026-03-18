@@ -124,3 +124,28 @@ def center_signal(signal: np.ndarray, baseline: np.ndarray) -> np.ndarray:
     """
     base_mean = baseline.mean(axis=1, keepdims=True)
     return (signal - base_mean)
+
+def mad_norm_signal(signal: np.ndarray, baseline: np.ndarray) -> np.ndarray:
+    """
+    Compute trial-wise MAD normalized signal.
+    Args:
+        signal (np.ndarray): Trial signal windows of shape (n_trials, n_time).
+        baseline (np.ndarray): Baseline windows of shape (n_trials, n_time).
+    Returns:
+        np.ndarray: MAD normalized signal windows.
+    """
+    median = np.median(baseline, axis=1, keepdims=True)
+    mad = np.median(np.abs(baseline - median), axis=1, keepdims=True)
+    return (signal - median) / (1.4826 * mad)
+
+def amp_norm_signal(signal: np.ndarray, baseline: np.ndarray) -> np.ndarray:
+    """
+    Compute trial-wise amplitude normalized signal.
+    Args:
+        signal (np.ndarray): Trial signal windows of shape (n_trials, n_time).
+        baseline (np.ndarray): Baseline windows of shape (n_trials, n_time).
+    Returns:
+        np.ndarray: Amplitude (scaled to 1) normalized signal windows.
+    """
+    zerod_sig = center_signal(signal, baseline)
+    return (zerod_sig / np.max(np.abs(zerod_sig), axis=1, keepdims=True))

@@ -229,7 +229,7 @@ def SUGA_process_whole_directory(
     # set up logger
     log = logging.getLogger(__name__)
     if log_file is not None:
-        logging.basicConfig(filename=log_file, filemode='w', level=logging.INFO)
+        logging.basicConfig(filename=log_file, filemode='w', level=logging.INFO, force=True)
 
     log.info("Starting data ripping process...")
 
@@ -317,12 +317,13 @@ def SUGA_process_whole_directory(
 ASSIGN_RE = re.compile(
     r"""
     ^\s*
+    (?:BOX\s*)
     (?P<group>[A-Z])          # A, B, ...
     \s*:?\s*
     (?:SUGA\s*)?              # optional 'SUGA'
     (?P<rat_num>\d+)
     \s*:?\s*
-    (?P<treatment>SALINE|GLUCOSE)
+    (?P<treatment>[A-Za-z0-9_-]+)
     \s*$
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -488,7 +489,7 @@ def SUGA_annotate_directory(data_dir: str, log_file: str | None = None, note_fil
     # set up logger
     log = logging.getLogger(__name__)
     if log_file is not None:
-        logging.basicConfig(filename=log_file, filemode='w', level=logging.INFO)
+        logging.basicConfig(filename=log_file, filemode='w', level=logging.INFO, force=True)
 
     # create list of tdt data folders, ignore non-directories
     tdt_folders_list = [os.path.join(data_dir, foldername) for foldername in os.listdir(data_dir)]
@@ -508,9 +509,17 @@ def SUGA_annotate_directory(data_dir: str, log_file: str | None = None, note_fil
             
             annots = parse_experiment_file(note_file_path, annotation_file_path)
 
+            if len(annots) == 0:
+                raise ValueError('Empty Annotation')
+            for box, annot in annots.items():
+                keys = list(annot.keys())
+                for test in ['rat', 'OC', 'CC']:
+                    if test not in keys:
+                        raise Warning(f'{test} not found in Box {box}')
+
         except Exception as e:
             log.error(f"Error annotating {tdt_folder}: \n\t {e}\n")
-            n_errors = 0
+            n_errors += 1
     
     log.info(f'Annotation complete with {n_errors} errors of out {len(tdt_folders_list)} folders!')
 
