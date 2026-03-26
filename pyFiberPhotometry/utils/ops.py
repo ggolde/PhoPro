@@ -1,5 +1,4 @@
 import numpy as np
-import os
 
 def reconstruct_time_points(bounds: tuple, freq: float) -> np.ndarray:
     """

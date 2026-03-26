@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Tuple
 
-from .core import PhotometryData, PhotometryExperiment
+from ..core import PhotometryData, PhotometryExperiment
 
 class SimulatedPhotometryGenerator:
     """
@@ -40,9 +40,8 @@ class SimulatedPhotometryGenerator:
         A_neural: float = 0.02, tau_p_sec: float = 0.6, 
         shape_k: int = 3, 
         # photobleaching
-        a1: float = 1.0, tau1_sec: float = 120.0, 
-        a2: float = 0.4, tau2_sec: float = 900.0, 
-        b0: float = 0.2,
+        bleach_params: dict = dict(a1=50, a2=20, tau1=300, tau2=10000, b0=1),
+        bleach_iso_scale: float = 0.9,
         # movement attenuation
         n_artifacts: int = 60, artifact_tau_sec: float = 0.8, 
         artifact_depth_range: Tuple[float, float] = (0.02, 0.15),
@@ -50,6 +49,8 @@ class SimulatedPhotometryGenerator:
         dependent_sigma_exp: float=1e-4, dependent_sigma_iso: float=1e-4,
         independent_sigma_exp: float=1e-5, independent_sigma_iso: float=1e-5,
         seed=0,
+        # custom artifacting
+        artifact_mask: np.ndarray | None = None,
     ):
         """
         Build simulated photometry data
@@ -84,9 +85,7 @@ class SimulatedPhotometryGenerator:
         self.tau_p_sec = float(tau_p_sec)
         self.shape_k = int(shape_k)
 
-        self.a1, self.tau1_sec = float(a1), float(tau1_sec)
-        self.a2, self.tau2_sec = float(a2), float(tau2_sec)
-        self.b0 = float(b0)
+        self.bleach_params = bleach_params
 
         self.n_artifacts = int(n_artifacts)
         self.artifact_tau_sec = float(artifact_tau_sec)
@@ -97,6 +96,8 @@ class SimulatedPhotometryGenerator:
         self.independent_sigma_exp = float(independent_sigma_exp)
         self.independent_sigma_iso = float(independent_sigma_iso)
 
+        self.artifact_mask = artifact_mask
+
         # build layers
         self.t, self.N = self._timebase()
         self.pulse_kernel, self.L = self._pulse_kernel()
@@ -104,21 +105,27 @@ class SimulatedPhotometryGenerator:
 
         self.neural_true = self._neural_layer()
         self.neural_norm = self.neural_true / np.std(self.neural_true)
-        self.B = self._photobleach_layer()
 
-        self.decay_curve = self.B / self.B.max()
-        self.neural_decaying = self.neural_true * self.decay_curve
+        self.B_exp = self._photobleach_layer(**self.bleach_params)
+        self.B_iso = bleach_iso_scale * self._photobleach_layer(**self.bleach_params)
 
-        F_exp0 = self.B + self.neural_decaying
-        F_iso0 = self.B.copy()
+        self.decay_exp = self.B_exp / self.B_exp.max()
+        self.decay_iso = self.B_iso / self.B_iso.max()
+        self.neural_decaying = self.neural_true * self.decay_exp
+
+        F_exp0 = self.B_exp + self.neural_decaying
+        F_iso0 = self.B_iso.copy()
 
         self.M = self._attenuation_layer()
         F_exp1, F_iso1 = F_exp0 * self.M, F_iso0 * self.M
 
         self.noise_exp, self.noise_iso = self._noise_layer()
 
-        self.F_exp = F_exp1 + self.noise_exp
-        self.F_iso = F_iso1 + self.noise_iso
+        if self.artifact_mask is None:
+            self.artifact_mask = np.ones(shape=self.N)
+
+        self.F_exp = (F_exp1 + self.noise_exp) * self.artifact_mask
+        self.F_iso = (F_iso1 + self.noise_iso) * self.artifact_mask
 
     # layer calculators
     def _timebase(self):
@@ -164,11 +171,11 @@ class SimulatedPhotometryGenerator:
             neural[i0:i0 + self.L] += h
         return neural
 
-    def _photobleach_layer(self):
+    def _photobleach_layer(self, a1: float, a2: float, tau1: float, tau2: float, b0: float):
         B = (
-            self.a1 * np.exp(-self.t / self.tau1_sec)
-            + self.a2 * np.exp(-self.t / self.tau2_sec)
-            + self.b0
+            a1 * np.exp(-self.t / tau1)
+            + a2 * np.exp(-self.t / tau2)
+            + b0
         )
         if np.any(B <= 0):
             raise ValueError("Photobleaching baseline B must be strictly positive.")
@@ -195,8 +202,8 @@ class SimulatedPhotometryGenerator:
         return M
     
     def _noise_layer(self):
-        self.dependent_noise_exp = self.decay_curve * (self.rng.normal(0.0, self.dependent_sigma_exp, size=self.N))
-        self.dependent_noise_iso = self.decay_curve * (self.rng.normal(0.0, self.dependent_sigma_iso, size=self.N))
+        self.dependent_noise_exp = self.decay_exp * (self.rng.normal(0.0, self.dependent_sigma_exp, size=self.N))
+        self.dependent_noise_iso = self.decay_iso * (self.rng.normal(0.0, self.dependent_sigma_iso, size=self.N))
         self.independent_noise_exp = self.rng.normal(0.0, self.independent_sigma_exp, size=self.N)
         self.independent_noise_iso = self.rng.normal(0.0, self.independent_sigma_iso, size=self.N)
 
@@ -207,7 +214,7 @@ class SimulatedPhotometryGenerator:
         low, high = bounds
         window_idxs = np.searchsorted(self.t, [center + low, center + high])
         return series[window_idxs[0]:window_idxs[1]]
-    
+
     # visualizations
     def plot_layers(self):
         fig, axs = plt.subplots(nrows=5, ncols=2, sharex=True, sharey='row', figsize=(10, 15))
@@ -220,8 +227,8 @@ class SimulatedPhotometryGenerator:
         axs[0, 1].set_title('Isosbestic signal')
 
         axs[1, 0].set_ylabel('Photobleaching')
-        axs[1, 0].plot(t, self.B)
-        axs[1, 1].plot(t, self.B)
+        axs[1, 0].plot(t, self.B_exp)
+        axs[1, 1].plot(t, self.B_iso)
 
         axs[2, 0].set_ylabel('Attenuation')
         axs[2, 0].plot(t, self.M)
@@ -235,6 +242,21 @@ class SimulatedPhotometryGenerator:
         axs[4, 0].plot(t, self.F_exp)
         axs[4, 1].plot(t, self.F_iso)
 
+    def get_single_event(self, event_idx: int = 0, buffer: tuple[float, float] = (0, 0)) -> tuple[np.ndarray, np.ndarray]:
+        event_onset = self.event_times_sec[event_idx]
+        
+        left = event_onset + buffer[0]
+        right = event_onset + self.event_dur_sec + buffer[1]
+
+        l_idx = np.searchsorted(self.t, left, side='left')
+        r_idx = np.searchsorted(self.t, right, side='right')
+
+        event_ts = self.neural_true[l_idx:r_idx]
+        ts = self.t[l_idx:r_idx] - event_onset
+
+        return event_ts, ts
+
+
 
     # export
     def to_dict(self):
@@ -245,7 +267,8 @@ class SimulatedPhotometryGenerator:
             "F_iso": self.F_iso,
             "neural_true": self.neural_true,
             "event_times_sec": self.event_times_sec,
-            "B": self.B,
+            "B_exp": self.B_exp,
+            "B_iso":self.B_iso,
             "M": self.M,
             "pulse_kernel": self.pulse_kernel,
         }

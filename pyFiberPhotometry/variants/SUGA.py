@@ -11,8 +11,7 @@ import re
 import logging
 
 from ..core import PhotometryData, PhotometryExperiment
-from ..utils import *
-from ..io import *
+from ..utils import io
 
 class SUGA_PhotometryExperiment(PhotometryExperiment):
     """
@@ -317,7 +316,7 @@ def SUGA_process_whole_directory(
 ASSIGN_RE = re.compile(
     r"""
     ^\s*
-    (?:BOX\s*)
+    (?:BOX\s*)?
     (?P<group>[A-Z])          # A, B, ...
     \s*:?\s*
     (?:SUGA\s*)?              # optional 'SUGA'
