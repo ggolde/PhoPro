@@ -1,11 +1,13 @@
 # **pyFiberPhotometry**
 
-**Python package for processing TDT fiber photometry data**
+**Python package for processing fiber photometry data**
 
-`pyFiberPhotometry` provides a framework for processing, annotating, and analyzing behavior-coupled fiber photometry datasets collected using Tucker-Davis Technologies (TDT) acquisition systems.
- Built around two core classes that are subclassed for specific pipeline implementations.
- PhotometryData holds trial-wise data in an AnnData format.
- PhotometryExperiment extracts and processes signals and event timestamps from TDT folders, yeilding PhotometryData.
+`pyFiberPhotometry` provides a framework for processing, analyzing, and simulating behavior-coupled fiber photometry datasets.
+ Currently it only natively supports importing data from Tucker-Davis Technologies (TDT) acquisition systems.
+ Built around two core classes that are subclassed for specific pipeline implementations. \
+ - PhotometryData holds trial-wise data in an AnnData format. \
+ - PhotometryExperiment extracts and processes signals, yeilding PhotometryData.
+
  Used internally in the **[Bizon-Setlow lab](https://neuroscience.ufl.edu/profile/bizon-jennifer/)** at the University of Florida.
 
 ---
@@ -48,7 +50,7 @@ exp.preprocess_signal(
     cutoff_frequency=2,
     order=4,
     method='dF/F',
-    normalization='nullZ',
+    model='IRLS',
     c=1.4,
 )
 # extract trials
@@ -58,7 +60,7 @@ exp.extract_trial_data(
     trial_bounds=(0, 3),
     baseline_bounds=(-3, 0),
     event_tolerences={},
-    normalization='none',
+    normalization='zscore',
     check_overlap=False,
 )
 # get trial data in PhotometryData format
@@ -84,6 +86,12 @@ trials.plot_line(0)
 ```
 
 ---
+
+## **Planned Features**
+This package is still in development, please suggest any features you would like to see implemented!
+- Improve import support for formats other than TDT.
+- Full tutorials and docs.
+- Better support for events in simulated data.
 
 ## **License**
 
