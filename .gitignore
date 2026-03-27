@@ -3,3 +3,4 @@ pyFiberPhotometry.egg-info/
 *.pyc
 .DS_Store
 **.vscode/
+pyrightconfig.json

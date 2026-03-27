@@ -40,6 +40,20 @@ def IRLS_fit(
     fitted_iso = res.fittedvalues.astype(np.float32, copy=False)
     return fitted_iso, res.params
 
+def IRLS_fit_no_intercept(
+        signal: np.ndarray,
+        isosbestic: np.ndarray,
+        maxiter: int,
+        c: float,
+        ) -> tuple[np.ndarray, Any]:
+    sig = _process_arr(signal)
+    iso = _process_arr(isosbestic)
+
+    model = sm.RLM(endog=sig, exog=iso, M=sm.robust.norms.TukeyBiweight(c=c))
+    res = model.fit(maxiter=maxiter)
+    fitted_iso = res.fittedvalues.astype(np.float32, copy=False)
+    return fitted_iso, res.params
+
 def windowed_OLS_fit(
         signal: np.ndarray,
         isosbestic: np.ndarray,
@@ -58,24 +72,6 @@ def windowed_OLS_fit(
     
     fitted_iso = np.concat(fitted_windows)
     return fitted_iso, fitted_params
-
-def compound_OLS_IRLS_fit(
-        signal: np.ndarray,
-        isosbestic: np.ndarray,
-        maxiter: int,
-        c: float,
-        ) -> tuple[np.ndarray, Any]:
-    sig = _process_arr(signal)
-    iso = _process_arr(isosbestic)
-    ISO = sm.add_constant(iso)
-
-    model = sm.OLS(endog=sig, exog=ISO)
-    res_ols = model.fit()
-
-    model = sm.RLM(endog=sig, exog=ISO, M=sm.robust.norms.TukeyBiweight(c=c))
-    res_irls = model.fit(maxiter=maxiter, start_params=res_ols.params)
-    fitted_iso = res_irls.fittedvalues.astype(np.float32, copy=False)
-    return fitted_iso, res_irls.params
 
 
 # --- photobleaching fitting ---

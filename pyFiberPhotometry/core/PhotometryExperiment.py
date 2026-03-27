@@ -15,7 +15,7 @@ from ..utils.ops import (
     zscore_signal, center_signal, mad_norm_signal, amp_norm_signal,
     neg_bi_exponential_5
 )
-from ..utils.stats import OLS_fit, IRLS_fit, compound_OLS_IRLS_fit, fit_photobleaching
+from ..utils.stats import OLS_fit, IRLS_fit, IRLS_fit_no_intercept, fit_photobleaching
 
 class PhotometryExperiment:
     id: str
@@ -159,7 +159,7 @@ class PhotometryExperiment:
             method: Literal['dF/F', 'dF', 'none'] = 'dF/F',
             normalization: Literal['nullZ', 'none'] = 'nullZ',
             maxiter: int = 1000,
-            fit_using: Literal['OLS', 'IRLS', 'Compound'] = 'Compound',
+            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept'] = 'IRLS',
             c: float | None = 3,
             detrend_bleaching: bool = False,
             ) -> None:
@@ -171,7 +171,7 @@ class PhotometryExperiment:
             method (str): Preprocessing method, either 'dF/F' or 'dF'.
             normalization (str): Method for whole signal normalization.
             maxiter (int): maximum iterations of isosbestic fit.
-            fit_using (Literal['OLS', 'IRLS', 'Compound']): model used to fit isosbestic.
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept']): model used to fit isosbestic.
             c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
                 1.4 <= c <= 3 is recommended. 
             n_windows (int): number of windows used if model is RollingOLS
@@ -265,7 +265,7 @@ class PhotometryExperiment:
             signal: np.ndarray, 
             isosbestic: np.ndarray, 
             maxiter: int = 1000,
-            fit_using: Literal['OLS', 'IRLS', 'Compound'] = 'IRLS',
+            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept'] = 'IRLS',
             c: float | None = None,
             ) -> tuple[np.ndarray, float, Any]:
         """
@@ -274,7 +274,7 @@ class PhotometryExperiment:
             signal (np.ndarray): Filtered signal trace.
             isosbestic (np.ndarray): Filtered isosbestic trace.
             maxiter (int): maximum iterations of isosbestic fit.
-            fit_using (Literal['OLS', 'IRLS', 'Compound']): model used to fit isosbestic.
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept']): model used to fit isosbestic.
             c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
                 1.4 <= c <= 3 is recommended. 
         Returns:
@@ -286,8 +286,10 @@ class PhotometryExperiment:
                 fitted_iso, params = OLS_fit(signal, isosbestic)
             case 'IRLS':
                 fitted_iso, params = IRLS_fit(signal, isosbestic, maxiter=maxiter, c=c)
-            case 'Compound':
-                fitted_iso, params = compound_OLS_IRLS_fit(signal, isosbestic, maxiter=maxiter, c=c)
+            case 'IRLS_no_intercept':
+                fitted_iso, params = IRLS_fit_no_intercept(signal, isosbestic, maxiter=maxiter, c=c)
+            case _:
+                raise ValueError(f'{fit_using} fitting method not recognized / not implemented!')
 
         # cheack output
         if np.isnan(fitted_iso).any():

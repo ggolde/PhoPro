@@ -11,8 +11,7 @@ import os
 import logging
 
 from ..core import PhotometryData, PhotometryExperiment
-from ..utils import *
-from ..io import *
+from ..utils.io import append_to_csv
 
 ArrayLike = Union[np.ndarray, Sequence[float]]
 
