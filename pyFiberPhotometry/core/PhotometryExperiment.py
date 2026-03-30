@@ -7,15 +7,15 @@ import matplotlib.pyplot as plt
 import matplotlib.axes
 import numpy as np
 import pandas as pd
-import tdt
 
 from .PhotometeryData import PhotometryData
+
 from ..utils.ops import (
     downsample_1d, reconstruct_time_points, 
     zscore_signal, center_signal, mad_norm_signal, amp_norm_signal,
     neg_bi_exponential_5
 )
-from ..utils.stats import OLS_fit, IRLS_fit, IRLS_fit_no_intercept, fit_photobleaching
+from ..utils.stats import OLS_fit, IRLS_fit, fit_photobleaching
 
 class PhotometryExperiment:
     id: str
@@ -32,65 +32,59 @@ class PhotometryExperiment:
     raw_isosbestic: np.ndarray
     frequency: float
     time: np.ndarray
-    trial_data: "PhotometryData"
+    trial_data: PhotometryData
 
     """
-    Handle extraction and preprocessing of raw photometry data from TDT folders.
+    Handles processing of raw photometry data.
     """
-    def __init__(
-        self,
-        data_folder: str,
-        box: str,
-        event_labels: list[str],
-        signal_label: str,
-        isosbestic_label: str,
-        notes_filename: str,
-    ):
+    def __init__( 
+            self,
+            raw_signal: np.ndarray,
+            raw_isosbestic: np.ndarray,
+            time: np.ndarray,
+            frequency: float,
+            events: dict = {},
+            metadata: dict = {},
+            ):
+        self.raw_signal = raw_signal
+        self.raw_isosbestic = raw_isosbestic
+        self.time = time
+        self.frequency = frequency
+        self.events = events
+        self.metadata = metadata
+        self.metadata['frequency'] = frequency
+
+    # --- import methods ---
+    @classmethod
+    def load_TDT(
+            cls,
+            data_folder: str,
+            box: str,
+            event_labels: list[str],
+            signal_label: str,
+            isosbestic_label: str,
+            downsample: int = 10,
+            ) -> PhotometryExperiment:
         """
-        Initialize a PhotometryExperiment with TDT configuration.
+        Load photometry data from TDT format.
         Args:
             data_folder (str): Path to the TDT block folder.
             box (str): TDT box identifier used in stream and epoc labels.
             event_labels (list[str]): Event labels to extract from epocs.
             signal_label (str): Base label for the signal channel.
             isosbestic_label (str): Base label for the isosbestic channel.
-            notes_filename (str): Name of the notes file associated with this session.
-        Returns:
-            None
-        """        
-        self.id = 'label'
-        self.data_folder = data_folder
-        self.notes_filename = notes_filename
-        self.box = box
-        self.signal_label = signal_label
-        self.isosbestic_label = isosbestic_label
-        self.event_labels = list(event_labels)
-
-        self.metadata = {}
-        self.events = {}
-
-    @classmethod
-    def manual_init(
-        cls, 
-        raw_signal: np.ndarray,
-        raw_isosbestic: np.ndarray,
-        time: np.ndarray,
-        frequency: float,
-        events: dict = {},
-        metadata: dict = {},
-    ) -> "PhotometryExperiment":
-        obj = PhotometryExperiment(
-            event_labels=list(events.keys()),
-            data_folder=None, box=None, signal_label=None, 
-            isosbestic_label=None, notes_filename=None
+            downsample (int): downsampling factor for the raw streams (mean pooling).
+        """
+        from .PhotometryLoader import TDTLoader
+        loader = TDTLoader(
+            data_folder=data_folder,
+            box=box,
+            event_labels=event_labels,
+            signal_label=signal_label,
+            isosbestic_label=isosbestic_label,
+            downsample=downsample,
         )
-        obj.raw_signal = raw_signal
-        obj.raw_isosbestic = raw_isosbestic
-        obj.time = time
-        obj.frequency = frequency
-        obj.events = events
-        obj.metadata = metadata
-        return obj
+        return loader.load()
                 
     # --- pipeline API ---
     def run_pipeline(self) -> None:
@@ -102,64 +96,15 @@ class PhotometryExperiment:
             None
         """
         return
-
-    # --- data extraction ---
-    def extract_data(self, downsample: int = 10) -> None:
-        """
-        Read a TDT block, extract streams and events, and downsample signals.
-        Args:
-            downsample (int): Integer downsampling factor for the raw streams.
-        Returns:
-            None
-        """
-        tdt_obj = tdt.read_block(self.data_folder)
-
-        # rip data out of TDT object
-        sig = tdt_obj.streams[self.signal_label + self.box].data
-        iso = tdt_obj.streams[self.isosbestic_label + self.box].data
-        fs = tdt_obj.streams[self.signal_label + self.box].fs
-
-        self.raw_signal: np.ndarray = downsample_1d(np.asarray(sig, dtype=np.float32), factor=downsample)
-        self.raw_isosbestic: np.ndarray = downsample_1d(np.asarray(iso, dtype=np.float32), factor=downsample)
-        self.frequency = float(fs) / downsample
-
-        n = self.raw_signal.size
-        self.time: np.ndarray = np.arange(n, dtype=float) / self.frequency
-
-        self.events = self.extract_events(tdt_obj)
-        del tdt_obj
-
-    def extract_events(self, tdt_obj) -> dict:
-        """
-        Used by `self.extract_data` to get event timestamps.
-        Seperated so child classes can implement extracting events fron annotation files instead.
-        Args:
-            tdt_obj (tdt): Object from `tdt.read_block()`.
-        Returns:
-            dict
-        """
-        # extract event timestamps for requested labels
-        events = {}
-        self.metadata['missing_events'] = []
-        for label in self.event_labels:
-            # some sessions may lack a label entirely if no events are recorded
-            if hasattr(tdt_obj.epocs, self.box + label):
-                ep = tdt_obj.epocs[self.box + label]
-                events[label] = np.asarray(ep.onset)
-            else:
-                events[label] = np.array([], dtype=float)
-                self.metadata['missing_events'].append(label)
-        return events
-
-    # --- signal processing ---
+    
     def preprocess_signal(
             self,
-            cutoff_frequency: float = 30.0, 
+            cutoff_frequency: float = 3.0, 
             order: int = 4,
-            method: Literal['dF/F', 'dF', 'none'] = 'dF/F',
-            normalization: Literal['nullZ', 'none'] = 'nullZ',
+            iso_correction_method: Literal['dF/F', 'dF', 'none'] = 'dF/F',
+            signal_normalization: Literal['zscore', 'nullZ', 'none'] = 'none',
+            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
             maxiter: int = 1000,
-            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept'] = 'IRLS',
             c: float | None = 3,
             detrend_bleaching: bool = False,
             ) -> None:
@@ -168,13 +113,13 @@ class PhotometryExperiment:
         Args:
             cutoff_frequency (float): Low-pass cutoff frequency in Hz.
             order (int): Butterworth filter order.
-            method (str): Preprocessing method, either 'dF/F' or 'dF'.
-            normalization (str): Method for whole signal normalization.
-            maxiter (int): maximum iterations of isosbestic fit.
-            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept']): model used to fit isosbestic.
+            iso_correction_method Literal['dF/F', 'dF', 'none']: Isosbestic correction method, 'dF/F' or 'dF'.
+            signal_normalization (Literal['zscore', 'nullZ', 'none']): Method for whole signal normalization, 'none' recommended.
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept']): model used to fit isosbestic.
+            maxiter (int): maximum iterations of IRLS isosbestic fit.
             c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
-                1.4 <= c <= 3 is recommended. 
-            n_windows (int): number of windows used if model is RollingOLS
+                1.4 <= c <= 3 is recommended unless there is large global drift is experimental signal, in which case c >= 10 is better. 
+            detrend_bleaching (bool): whether or not to detrend signals for photobleaching using a (sig - bleach) / bleach scheme.
         Returns:
             None
         """
@@ -221,127 +166,42 @@ class PhotometryExperiment:
             fitted_iso = None
 
         # procesing / normalization methods
-        self.metadata['signal_processing_method'] = method 
-        match method:
+        self.metadata['signal_processing_method'] = iso_correction_method 
+        match iso_correction_method:
             case 'dF':
                 self.signal = (filt_sig - fitted_iso)
             case 'dF/F':
                 self.signal = (filt_sig - fitted_iso) / np.maximum(fitted_iso, np.finfo(np.float32).eps)
             case 'none':
                 self.signal = filt_sig
+            case _:
+                raise ValueError(f'{iso_correction_method} isosbestic correction method not recognized!')
 
-        match normalization:
+        match signal_normalization:
+            case 'zscore':
+                self.signal = (self.signal - np.mean(self.signal)) / np.std(self.signal)
             case 'nullZ':
                 self.signal = self.signal / np.std(self.signal)
             case 'none':
                 pass
+            case _:
+                raise ValueError(f'{signal_normalization} whole signal normalization method not recognized!')
 
         self.signal = self.signal.astype(np.float32, copy=False)
         return
     
-    def low_frequency_pass_butter(
-            self,
-            signal: np.ndarray, 
-            sample_frequency: float, 
-            cutoff_frequency: float = 30.0, 
-            order: int = 4
-        ) -> np.ndarray:
-        """
-        Apply a low-pass Butterworth filter to a 1D signal. Usually already done by photometry machine at 20 or 30 Hz.
-        Args:
-            signal (np.ndarray): Input signal array.
-            sample_frequency (float): Sampling frequency in Hz.
-            cutoff_frequency (float): Low-pass cutoff frequency in Hz.
-            order (int): Butterworth filter order.
-        Returns:
-            np.ndarray: Filtered signal.
-        """        
-        normalized_frequency = cutoff_frequency / (sample_frequency / 2)
-        sos = butter(order, normalized_frequency, btype='low', output='sos') 
-        return sosfiltfilt(sos, signal, axis=0, padtype='odd', padlen=None)
-    
-    def fit_isosbestic_to_signal(
-            self, 
-            signal: np.ndarray, 
-            isosbestic: np.ndarray, 
-            maxiter: int = 1000,
-            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept'] = 'IRLS',
-            c: float | None = None,
-            ) -> tuple[np.ndarray, float, Any]:
-        """
-        Fit the isosbestic channel to the signal using IRLS.
-        Args:
-            signal (np.ndarray): Filtered signal trace.
-            isosbestic (np.ndarray): Filtered isosbestic trace.
-            maxiter (int): maximum iterations of isosbestic fit.
-            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept']): model used to fit isosbestic.
-            c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
-                1.4 <= c <= 3 is recommended. 
-        Returns:
-            tuple[np.ndarray, float, np.ndarry]: Fitted isosbestic, R² value, and fit coefficients.
-        """
-        # fit using specified model
-        match fit_using:
-            case 'OLS':
-                fitted_iso, params = OLS_fit(signal, isosbestic)
-            case 'IRLS':
-                fitted_iso, params = IRLS_fit(signal, isosbestic, maxiter=maxiter, c=c)
-            case 'IRLS_no_intercept':
-                fitted_iso, params = IRLS_fit_no_intercept(signal, isosbestic, maxiter=maxiter, c=c)
-            case _:
-                raise ValueError(f'{fit_using} fitting method not recognized / not implemented!')
-
-        # cheack output
-        if np.isnan(fitted_iso).any():
-            raise ValueError(f'NaN values in fitted isosbestic.')
-        r2_val = r2_score(signal, fitted_iso)
-        return fitted_iso, r2_val, params
-    
-    def detrend_photobleching(
-            self,
-            signal: np.ndarray,
-            window_dur: float = 5,
-            ) -> np.ndarray:
-        fitted_curve, fitted_params = self.fit_photobleaching_curve(signal=signal, window_dur=window_dur)
-        return (signal - fitted_curve) / fitted_curve
-    
-    def fit_photobleaching_curve(
-            self,
-            signal: np.ndarray, 
-            window_dur: float =  5,
-            ) -> tuple[np.ndarray, pd.DataFrame]:
-        """
-        Fit a negative bi-exponential to photobleaching trend in raw signal and isosbestic
-        using a sliding window median downsampling scheme.
-        Args:
-            signal (np.ndarray): array of signal to fit photobleaching curve to.
-            window (float): length of window in seconds used for sliding window median downsampling.
-        Returns:
-            tuple[np.ndarray, pd.DataFrame]: array of fitted curve and DataFrame of parameters and metrics.
-        """
-        window_len = int(window_dur * self.frequency)
-        fitted_curve, params = fit_photobleaching(signal, self.time, window=window_len)
-        r2_val = r2_score(signal, fitted_curve)
-        mse_val = mean_squared_error(signal, fitted_curve)
-
-        row = {'id': self.id, 
-               'a1': params[0], 'b1': params[1], 'a2': params[2], 'b2': params[3], 'c': params[4],
-               'r2_val': r2_val, 'mse_val': mse_val}
-        
-        return fitted_curve, pd.DataFrame([row])
-    
-    # --- extraction of trial-wise data ---
     def extract_trial_data(
-        self,
-        align_to: str,
-        center_on: list[str],
-        trial_bounds: tuple[float, float],
-        baseline_bounds: tuple[float, float] | None = None,
-        event_tolerences: dict[str, tuple[float, float]] = {},
-        normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] = 'none',
-        check_overlap: bool = True,
-        time_error_threshold: float = 0.01,
-    ) -> None:
+            self,
+            align_to: str,
+            center_on: list[str],
+            trial_bounds: tuple[float, float],
+            baseline_bounds: tuple[float, float] | None = None,
+            event_tolerences: dict[str, tuple[float, float]] = {},
+            trial_normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] = 'none',
+            check_overlap: bool = True,
+            time_error_threshold: float = 0.1,
+            event_conflict_logic: Literal['first', 'last', 'mean'] = 'first',
+            ) -> None:
         """
         Build trial-wise windows, normalize, and store trial data.
         Args:
@@ -350,9 +210,10 @@ class PhotometryExperiment:
             trial_bounds (list[float, float]): Trial window bounds relative to ``center_on`` events.
             baseline_bounds (list[float, float]): Baseline window bounds relative to ``align_to`` event.
             event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation, relative to ``align_to``.
-            normalization (Literal['zscore', 'zero', 'none']): Normalization method for trial signals based on baselines.
+            trial_normalization (Literal['zscore', 'zero', 'none']): Normalization method for trial signals based on baselines.
             check_overlap (bool): Whether to throw an error multiple ``center_on`` events are found in the same trial.
             time_error_threshold (float): Maximum allowed mean timing error.
+            event_conflict_logic (Literal['first', 'last', 'mean']): Logic for choosing center on event timestamps if multiple of the same event are present.
         Returns:
             None
         """        
@@ -365,8 +226,8 @@ class PhotometryExperiment:
 
         if baseline_bounds is None:
             calc_baselines = False
-            if normalization in ['zscore', 'zero']:
-                raise ValueError(f'Baseline bounds have to be specified to for normalization method {normalization}')
+            if trial_normalization in ['zscore', 'zero']:
+                raise ValueError(f'Baseline bounds have to be specified to for normalization method {trial_normalization}')
         else:
             calc_baselines = True
 
@@ -380,7 +241,8 @@ class PhotometryExperiment:
             series=self.time, 
             centers=align_events,
             events=self.events, 
-            tolorences=event_tolerences
+            tolorences=event_tolerences,
+            logic=event_conflict_logic
             )
         
         # find window centers using the selected events
@@ -412,7 +274,7 @@ class PhotometryExperiment:
             baseline_signals, baseline_times, baseline_events = None, None, None
 
         # apply trial-wise normalization method
-        match normalization:
+        match trial_normalization:
             case 'zscore':
                 trial_signals = zscore_signal(raw_trial_signals, baseline_signals)
             case 'zero':
@@ -422,7 +284,9 @@ class PhotometryExperiment:
             case 'amp':
                 trial_signals = amp_norm_signal(raw_trial_signals, baseline_signals)
             case 'none':
-                trial_signals = raw_trial_signals
+                trial_signals = raw_trial_signals.copy()
+            case _:
+                raise ValueError(f'{trial_normalization} trial-wise normalization method not recognized!')
         
         # reconstruct times for consistency
         trial_time_points = reconstruct_time_points(trial_bounds, self.frequency)
@@ -433,33 +297,132 @@ class PhotometryExperiment:
             baseline_time_points = None
 
         # save trial data
-        self.trial_signals = trial_signals
-        self.trial_time_points = trial_time_points
-        self.trial_events = trial_events
         self.raw_trial_signal = raw_trial_signals
         self.trial_data = PhotometryData.from_arrays(
             obs=pd.DataFrame(trial_events),
             data=trial_signals,
             time_points=trial_time_points,
-            metadata=self.metadata,
+            metadata=self.metadata.copy(),
         )
 
         if calc_baselines:
-            self.baseline_signals = baseline_signals
-            self.baseline_time_points = baseline_time_points
-            self.baseline_events = baseline_events
             self.baseline_data = PhotometryData.from_arrays(
                 obs=pd.DataFrame(baseline_events),
                 data=baseline_signals,
                 time_points=baseline_time_points,
-                metadata=self.metadata,
+                metadata=self.metadata.copy(),
             )
 
         # check error in times
         time_err = trial_times.std(axis=0).mean()
         if time_err > time_error_threshold:
             raise ValueError(f'Error in rounded times is too high: {time_err} > {time_error_threshold}')
+
+    # --- signal processing ---
+    def low_frequency_pass_butter(
+            self,
+            signal: np.ndarray, 
+            sample_frequency: float, 
+            cutoff_frequency: float = 30.0, 
+            order: int = 4,
+            axis: int = 0,
+        ) -> np.ndarray:
+        """
+        Apply a low-pass Butterworth filter to a 1D signal. Usually already done by photometry machine at 20 or 30 Hz.
+        Args:
+            signal (np.ndarray): Input signal array.
+            sample_frequency (float): Sampling frequency in Hz.
+            cutoff_frequency (float): Low-pass cutoff frequency in Hz.
+            order (int): Butterworth filter order.
+            axis (int): axis of array to perform a lowpass on.
+        Returns:
+            np.ndarray: Filtered signal.
+        """        
+        normalized_frequency = cutoff_frequency / (sample_frequency / 2)
+        sos = butter(order, normalized_frequency, btype='low', output='sos') 
+        return sosfiltfilt(sos, signal, axis=axis, padtype='odd', padlen=None)
+    
+    def fit_isosbestic_to_signal(
+            self, 
+            signal: np.ndarray, 
+            isosbestic: np.ndarray, 
+            maxiter: int = 1000,
+            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
+            c: float | None = None,
+            ) -> tuple[np.ndarray, float, Any]:
+        """
+        Fit the isosbestic channel to the signal using IRLS.
+        Args:
+            signal (np.ndarray): Filtered signal trace.
+            isosbestic (np.ndarray): Filtered isosbestic trace.
+            maxiter (int): maximum iterations of isosbestic fit.
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept']): model used to fit isosbestic.
+            c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
+                1.4 <= c <= 3 is recommended. 
+        Returns:
+            tuple[np.ndarray, float, np.ndarry]: Fitted isosbestic, R² value, and fit coefficients.
+        """
+        # fit using specified model
+        match fit_using:
+            case 'OLS':
+                fitted_iso, params = OLS_fit(signal, isosbestic, add_intercept=True)
+            case 'IRLS':
+                fitted_iso, params = IRLS_fit(signal, isosbestic, maxiter=maxiter, c=c, add_intercept=True)
+            case 'OLS_no_intercept':
+                fitted_iso, params = OLS_fit(signal, isosbestic, add_intercept=False)
+            case 'IRLS_no_intercept':
+                fitted_iso, params = IRLS_fit(signal, isosbestic, maxiter=maxiter, c=c, add_intercept=False)
+            case _:
+                raise ValueError(f'{fit_using} fitting method not recognized!')
+
+        # cheack output
+        if np.isnan(fitted_iso).any():
+            raise ValueError(f'NaN values in fitted isosbestic.')
+        r2_val = r2_score(signal, fitted_iso)
+        return fitted_iso, r2_val, params
+    
+    def detrend_photobleching(
+            self,
+            signal: np.ndarray,
+            window_dur: float = 5,
+            ) -> np.ndarray:
+        '''
+        Detrend photobleaching from a signal using a (signal - bleach) / bleach scheme.
+        Args:
+            signal (np.ndarray): 1D array of signal.
+            window_dur (float): length of window in seconds used for sliding window median downsampling.
+        Returns:
+            detrended_signal (np.ndarray): (signal - bleach) / bleach.
+        '''
+        fitted_curve, fitted_params = self.fit_photobleaching_curve(signal=signal, window_dur=window_dur)
+        return (signal - fitted_curve) / fitted_curve
+    
+    def fit_photobleaching_curve(
+            self,
+            signal: np.ndarray, 
+            window_dur: float =  5,
+            ) -> tuple[np.ndarray, pd.DataFrame]:
+        """
+        Fit a negative bi-exponential to photobleaching trend in raw signal and isosbestic
+        using a sliding window median downsampling scheme.
+        Args:
+            signal (np.ndarray): array of signal to fit photobleaching curve to.
+            window (float): length of window in seconds used for sliding window median downsampling.
+        Returns:
+            tuple[np.ndarray, pd.DataFrame]: array of fitted curve and DataFrame of parameters and metrics.
+        """
+        window_len = int(window_dur * self.frequency)
+        fitted_curve, params = fit_photobleaching(signal, self.time, window=window_len)
+        r2_val = r2_score(signal, fitted_curve)
+        mse_val = mean_squared_error(signal, fitted_curve)
+
+        row = {'id': self.id, 
+               'a1': params[0], 'b1': params[1], 'a2': params[2], 'b2': params[3], 'c': params[4],
+               'r2_val': r2_val, 'mse_val': mse_val}
         
+        return fitted_curve, pd.DataFrame([row])
+    
+    # --- extraction of trial-wise data ---
     def find_interval_bounds(self, series: np.ndarray, centers: np.ndarray, bounds: tuple[int, int]) -> np.ndarray:
         """
         Compute index bounds for windows around specified centers.
@@ -474,13 +437,19 @@ class PhotometryExperiment:
         left_idxs = np.searchsorted(series, centers + low, side='left')
         right_idxs = np.searchsorted(series, centers + high, side='right')
         return np.c_[left_idxs, right_idxs]
-
-    def first_timestamp_in_intervals(self, timestamps: np.ndarray, time_intervals: np.ndarray) -> np.ndarray:
+    
+    def find_timestamp_in_intervals(
+            self, 
+            timestamps: np.ndarray, 
+            time_intervals: np.ndarray, 
+            logic: Literal['first', 'last', 'mean'] = 'first',
+            ) -> np.ndarray:
         """
-        Find the first timestamp that falls within each time interval.
+        Find timestamps that falls within each time interval and select with customizable logic.
         Args:
             timestamps (np.ndarray): Sorted 1D array of event timestamps.
-            time_intervals (np.ndarray): Array of shape (n, 2) with [start, end] bounds.
+            time_intervals (np.ndarray): Array of shape (n_trials, 2) with [start, end] bounds.
+            logic (Literal['first', 'last', 'mean'] | int): Logic for choosing event timestamps if multiple are present.
         Returns:
             np.ndarray: Array of first timestamps per interval or NaN if none exist.
         """        
@@ -489,12 +458,35 @@ class PhotometryExperiment:
         lo_idx = np.searchsorted(timestamps, time_intervals[:, 0], side="left")
         hi_idx = np.searchsorted(timestamps, time_intervals[:, 1], side="right")
         in_interval = lo_idx < hi_idx
-        # returns lowest event if within interval
+
+        # perform choice logic
         out = np.full(len(time_intervals), np.nan, float)
-        out[in_interval] = timestamps[lo_idx[in_interval]]
+        match logic:
+            case 'first':
+                out[in_interval] = timestamps[lo_idx[in_interval]]
+            case 'last':
+                out[in_interval] = timestamps[hi_idx[in_interval]]
+            case 'mean':
+                counts = hi_idx - lo_idx
+                in_interval = counts > 0
+
+                csum = np.concatenate(([0.0], np.cumsum(timestamps)))
+                sums = csum[hi_idx] - csum[lo_idx]
+
+                out[in_interval] = sums[in_interval] / counts[in_interval]
+            case _:
+                raise ValueError(f'Multiple event selection logic, {logic}, is not recognized')
         return out
     
-    def annotate_intervals(self, align_to: str, series: np.ndarray, centers: np.ndarray, events: dict[str, np.ndarray], tolorences: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    def annotate_intervals(
+            self, 
+            align_to: str, 
+            series: np.ndarray, 
+            centers: np.ndarray, 
+            events: dict[str, np.ndarray], 
+            tolorences: dict[str, np.ndarray],
+            logic: Literal['first', 'last', 'mean'] = 'first',
+            ) -> dict[str, np.ndarray]:
         """
         Annotate intervals around centers with event timestamps within tolerances.
         Args:
@@ -503,6 +495,7 @@ class PhotometryExperiment:
             centers (np.ndarray): Center times for each trial.
             events (dict[str, np.ndarray]): Mapping of event labels to timestamps.
             tolorences (dict[str, np.ndarray]): Mapping of labels to time tolerances.
+            logic (Literal['first', 'last', 'mean'] | int): Logic for choosing event timestamps if multiple are present.
         Returns:
             dict[str, np.ndarray]: Mapping from labels to aligned event times per trial.
         """        
@@ -512,7 +505,7 @@ class PhotometryExperiment:
             timestamps = events.get(label)
             interval_bounds = self.find_interval_bounds(series=series, centers=centers, bounds=bounds)
             time_intervals = series[interval_bounds]
-            out[label] = self.first_timestamp_in_intervals(timestamps=timestamps, time_intervals=time_intervals)
+            out[label] = self.find_timestamp_in_intervals(timestamps=timestamps, time_intervals=time_intervals, logic=logic)
         return out
 
     def create_windows(self, signal: np.ndarray, time: np.ndarray, events: dict[str, np.ndarray], centers: np.ndarray, bounds: tuple[int, int]) -> tuple[np.ndarray, np.ndarray, dict]:

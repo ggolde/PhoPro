@@ -152,18 +152,29 @@ class PhotometryData:
     @property
     def var(self) -> pd.DataFrame: return cast(pd.DataFrame, self.adata.var)
     @property
-    def uns(self) -> dict: return dict(self.adata.uns)
+    def uns(self) -> dict: return cast(dict, self.adata.uns)
     @property
     def n_trials(self) -> int: return self.adata.n_obs
     @property
     def n_times(self) -> int: return self.adata.n_vars
+
+    # --- conveience setters ---
+    @X.setter
+    def X(self, value: np.ndarray) -> None: self.adata.X = value
+    @obs.setter
+    def obs(self, value: pd.DataFrame) -> None: self.adata.obs = value
+    @var.setter
+    def var(self, value: pd.DataFrame) -> None: self.adata.var = value
+    @uns.setter
+    def uns(self, value: dict) -> None: self.adata.uns = value
 
     # --- hidden functions ---
     def _agg(
             self, 
             method: Callable[..., np.ndarray], 
             group_on: list[str] | None, 
-            data_cols: list[str], 
+            data_cols: list[str],
+            collapse_cols: list[str] | None = None,
             count_col: str | None = None
             ) -> tuple[pd.DataFrame, np.ndarray]:
         """
@@ -186,20 +197,29 @@ class PhotometryData:
             obs_agg = pd.DataFrame(columns=new_cols, index=[0])
             obs_agg.loc[0, data_cols] = method(obs.loc[:, data_cols], axis=0)
             if count_col is not None: obs_agg.loc[0, count_col] = obs.index.size
+            if collapse_cols is not None:
+                for col in collapse_cols:
+                    obs_agg.loc[0, col] = obs[col].to_list()
 
         else:
-            groups = obs.groupby(group_on, sort=False, observed=False).indices
+            groups = obs.groupby(group_on, sort=False, observed=True).indices # observed needs to be True
             n_groups = len(groups)
             new_cols = group_on + data_cols if count_col is None else group_on + [count_col] + data_cols
+            if collapse_cols is not None:
+                new_cols = new_cols + collapse_cols
             
             X_agg = np.empty((n_groups, X.shape[1]), dtype=X.dtype)
-            obs_agg = pd.DataFrame(columns=new_cols, index=range(n_groups))
+            obs_agg = pd.DataFrame(columns=new_cols, index=np.arange(n_groups))
 
             for i, (gkey, idxs) in enumerate(groups.items()):
                 X_agg[i] = method(X[idxs], axis=0)
                 obs_agg.loc[i, group_on] = gkey
                 obs_agg.loc[i, data_cols] = method(obs.iloc[idxs][data_cols], axis=0)
                 if count_col is not None: obs_agg.loc[i, count_col] = len(idxs)
+                if collapse_cols is not None:
+                    for col in collapse_cols:
+                        obs_agg.loc[i, col] = obs.iloc[idxs][col].to_list()
+
 
         # clean dtypes
         obs_agg = obs_agg.infer_objects()
@@ -275,8 +295,9 @@ class PhotometryData:
             self,
             group_on: list[str] | None,
             method: Callable = np.nanmean,
-            metrics: dict[str, Callable] = {},
+            metrics: dict[str, Callable] = {'std':np.std},
             data_cols: list[str] = [],
+            collapse_cols: list[str] | None = None,
             count_col: str | None = 'n'
             ) -> "PhotometryData":
         """
@@ -286,15 +307,16 @@ class PhotometryData:
             method (callable): Aggregation function for the main X matrix.
             metrics (dict[str, callable]): Additional named aggregation functions stored as layers.
             data_cols (list[str]): Observation columns to aggregate with each method.
-            count_col (str | None): Optional column name to store group counts.
+            collapse_cols (list[str] | None): Optional, columns to collapse to lists.
+            count_col (str | None): Optional, column name to store group counts.
         Returns:
             PhotometryData.
         """        
-        obs_agg, X_agg = self._agg(method=method, group_on=group_on, data_cols=data_cols, count_col=count_col)
+        obs_agg, X_agg = self._agg(method=method, group_on=group_on, data_cols=data_cols, count_col=count_col, collapse_cols=collapse_cols)
 
         layers = {}
         for key, func in metrics.items():
-            obs_lay, X_lay = self._agg(method=func, group_on=group_on, data_cols=data_cols, count_col=count_col)
+            obs_lay, X_lay = self._agg(method=func, group_on=group_on, data_cols=data_cols, count_col=count_col, collapse_cols=None)
             layers[key] = X_lay
             obs_agg = obs_agg.join(obs_lay[data_cols], rsuffix='_' + str(key))
         
@@ -368,8 +390,6 @@ class PhotometryData:
         obs = self.adata.obs.copy()
         if event_cols is not None:
             obs[event_cols] = obs[event_cols] - centers[:, None]
-
-        
 
         out: "PhotometryData" = PhotometryData.from_arrays(
             obs=obs,
@@ -478,6 +498,18 @@ class PhotometryData:
                 file_name = '_'.join([f'{name}-{val}' for name, val in zip(group_on, gkey)]) + save_ext
                 plt.savefig(os.path.join(save_dir, file_name), dpi=save_dpi)
             plt.show()
+    
+    def plot_all(
+            self,
+            label_with: list[str] | None = None, 
+            err_layer: str | None = None, 
+            plt_kwargs: dict = {},
+            ax = None,
+            ):
+        idxs = np.arange(self.n_trials, dtype=int)
+        self.plot_set(subset=idxs, label_with=label_with, err_layer=err_layer, plt_kwargs=plt_kwargs, ax=ax)
+        plt.show()
+
 
     # --- convienience ---
     def filter_rows(self, mask: np.ndarray, inplace: bool = False) -> "None | PhotometryData":

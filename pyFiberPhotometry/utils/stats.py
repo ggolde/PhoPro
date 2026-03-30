@@ -15,12 +15,14 @@ def _process_arr(arr: np.ndarray) -> np.ndarray:
 def OLS_fit(
         signal: np.ndarray,
         isosbestic: np.ndarray,
+        add_intercept: bool = True,
         ) -> tuple[np.ndarray, Any]:
     sig = _process_arr(signal)
     iso = _process_arr(isosbestic)
-    ISO = sm.add_constant(iso)
+    if add_intercept:
+        iso = sm.add_constant(iso)
 
-    model = sm.OLS(endog=sig, exog=ISO)
+    model = sm.OLS(endog=sig, exog=iso)
     res = model.fit()
     fitted_iso = res.fittedvalues.astype(np.float32, copy=False)
     return fitted_iso, res.params
@@ -30,24 +32,12 @@ def IRLS_fit(
         isosbestic: np.ndarray,
         maxiter: int,
         c: float,
+        add_intercept: bool = True,
         ) -> tuple[np.ndarray, Any]:
     sig = _process_arr(signal)
     iso = _process_arr(isosbestic)
-    ISO = sm.add_constant(iso)
-
-    model = sm.RLM(endog=sig, exog=ISO, M=sm.robust.norms.TukeyBiweight(c=c))
-    res = model.fit(maxiter=maxiter)
-    fitted_iso = res.fittedvalues.astype(np.float32, copy=False)
-    return fitted_iso, res.params
-
-def IRLS_fit_no_intercept(
-        signal: np.ndarray,
-        isosbestic: np.ndarray,
-        maxiter: int,
-        c: float,
-        ) -> tuple[np.ndarray, Any]:
-    sig = _process_arr(signal)
-    iso = _process_arr(isosbestic)
+    if add_intercept:
+        iso = sm.add_constant(iso)
 
     model = sm.RLM(endog=sig, exog=iso, M=sm.robust.norms.TukeyBiweight(c=c))
     res = model.fit(maxiter=maxiter)

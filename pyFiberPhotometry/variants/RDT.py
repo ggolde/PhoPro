@@ -10,7 +10,7 @@ import re
 import os
 import logging
 
-from ..core import PhotometryData, PhotometryExperiment
+from ..core import PhotometryData, PhotometryExperiment, TDTLoader
 from ..utils.io import append_to_csv
 
 ArrayLike = Union[np.ndarray, Sequence[float]]
@@ -153,6 +153,7 @@ class RDT_PhotometryData(PhotometryData):
         return info_str
 
 class RDT_PhotometryExperiment(PhotometryExperiment):
+    trial_data: RDT_PhotometryData
     """
     RDT-specific implementation of PhotometryExperiment for TDT-based RDT sessions.
     """
@@ -164,9 +165,10 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         signal_label: str = "_465",
         isosbestic_label: str = "_405",
         annot_filename: str = "annotations.json",
+        downsample: int = 10,
         ):
         """
-        Initialize an RDT_PhotometryExperiment with TDT and RDT settings.
+        Initialize an RDT_PhotometryExperiment from TDT data.
         Args:
             data_folder (str): Path to the TDT block folder.
             box (str): TDT box identifier.
@@ -177,10 +179,25 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         Returns:
             RDT_PhotometryExperiment
         """
-        super().__init__(data_folder, box, event_labels, signal_label, isosbestic_label, annot_filename)
+        # load from TDT format
+        loader = TDTLoader(data_folder, box, event_labels, signal_label, isosbestic_label, downsample)
+        data = loader.extract_data()
+        super().__init__(**data)
 
-        self.parse_annotations(self.notes_filename)
+        # save important info
+        self.data_folder = data_folder
+        self.box = box
+        self.event_labels = event_labels
+        self.signal_label = signal_label
+        self.isosbestic_label = isosbestic_label
+        self.annot_filename = annot_filename
+        self.downsample = downsample
         self.metadata['folder'] = self.data_folder
+
+        # parse annotations
+        self.parse_annotations(annot_filename)
+        
+        # construct unique ID
         self.id = (
             f"{self.metadata.get('rat', 'UnknownRat')}_"
             f"{self.metadata.get('current', 'UnknownCurrent')}uA_"
@@ -194,23 +211,26 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
     def run_pipeline(
         self,
         logger: logging.Logger | None = None,
-        downsample: int = 10,
-        cutoff_frequency: float = 30.0,
+
+        cutoff_frequency: float = 3.0, 
         order: int = 4,
-        preprocess_method: str = 'dF/F',
-        preprocess_normalization: Literal['nullZ', 'none'] = 'nullZ',
-        c: float = 3,
-        maxiter: int = 200,
+        iso_correction_method: Literal['dF/F', 'dF', 'none'] = 'dF/F',
+        signal_normalization: Literal['zscore', 'nullZ', 'none'] = 'none',
+        fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
+        maxiter: int = 1000,
+        c: float | None = 3,
+        detrend_bleaching: bool = False,
         
         align_to: str = 'Hsl',
         center_on: list[str] = ['Lrg', 'Sml'],
         trial_bounds: Tuple[float, float] = (-23.0, 5.0),
         baseline_bounds: Tuple[float, float] = (-5, -1),
         event_tolerences: Dict[str, Tuple[float, float]] = {'Lrg' : (5, 18), 'Sml' : (5, 18), 'Zap': (4.5, 18.5)},
-        normalization: Literal['zscore', 'zero', 'none'] = 'none',
+        trial_normalization: Literal['zscore', 'zero', 'none'] = 'none',
         check_overlap: bool = False,
         poor_signal_threshold: float = 0.075,
         time_error_threshold: float = 0.01,
+        event_conflict_logic: Literal['first', 'last', 'mean'] = 'first',
 
         n_blocks: int = 3,
         free_trial_slices: list[list[int]] = ((8, 28), (36, 56), (64, 84)),
@@ -219,25 +239,30 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         to_trim: list[str] | None = None,
         ) -> None:
         """
-        Run full RDT pipeline: extract, preprocess, window trials, label, QC, and optionally save.
+        Run full RDT pipeline: preprocess, window trials, label, QC, and optionally save.
         Args:
             logger (logging.Logger | None): Logger for status messages.
-            downsample (int): Downsampling factor for raw TDT streams.
-            cutoff_frequency (float): Low-pass filter cutoff in Hz.
+
+            cutoff_frequency (float): Low-pass cutoff frequency in Hz.
             order (int): Butterworth filter order.
-            preprocess_method (str): Preprocessing method, e.g. 'dF/F' or 'dF'.
-            preprocess_normalization (str): Normalization for whole processed signal, 'nullZ' or 'none'.
-            c (float): Tukey-biweight IRLS parameter, lower means more aggressive downweighting. 1.4 <= c <= 3 is recommended.
-            maxiter (int): Maximum iterations for IRLS isosbestic to signal fitting.
-            align_to (str): Primary event label used to align trials.
-            center_on (list[str]): Events used to refine trial centers.
-            trial_bounds (tuple[float, float]): Trial window bounds relative to center.
-            baseline_bounds (tuple[float, float]): Baseline window bounds relative to center.
-            event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation.
-            normalization (Literal['zscore', 'zero', 'none']): Trial normalization method.
+            iso_correction_method Literal['dF/F', 'dF', 'none']: Isosbestic correction method, 'dF/F' or 'dF'.
+            signal_normalization (Literal['zscore', 'nullZ', 'none']): Method for whole signal normalization, 'none' recommended.
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept']): model used to fit isosbestic.
+            maxiter (int): maximum iterations of IRLS isosbestic fit.
+            c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
+                1.4 <= c <= 3 is recommended unless there is large global drift is experimental signal, in which case c >= 10 is better. 
+            detrend_bleaching (bool): whether or not to detrend signals for photobleaching using a (sig - bleach) / bleach scheme.
+            
+            align_to (str): Event label used to align and identify trial, should be one per trial.
+            center_on (list[str]): Event labels to center trial windows on.
+            trial_bounds (list[float, float]): Trial window bounds relative to ``center_on`` events.
+            baseline_bounds (list[float, float]): Baseline window bounds relative to ``align_to`` event.
+            event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation, relative to ``align_to``.
+            trial_normalization (Literal['zscore', 'zero', 'none']): Normalization method for trial signals based on baselines.
             check_overlap (bool): Whether to throw an error multiple ``center_on`` events are found in the same trial.
-            poor_signal_threshold (float): Threshold for poor signal checking.
-            time_error_threshold (float): Threshold on timing error for sanity check.
+            time_error_threshold (float): Maximum allowed mean timing error.
+            event_conflict_logic (Literal['first', 'last', 'mean']): Logic for choosing center on event timestamps if multiple of the same event are present.
+            
             n_blocks (int): Number of RDT blocks.
             free_trial_slices (list[list[int]]): Free trial index ranges per block.
             block_labels (list[str]): Labels for each block.
@@ -250,9 +275,9 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         log = logger or logging.getLogger(__name__)
         log.info(f"Starting Pipeline {self.id}...")
         
-        # step 1: extract raw data from TDT
-        log.info(f"Extracting raw data from TDT block, downsampling x{downsample}...")
-        self.extract_data(downsample=downsample)
+        # step 1: Validate extraction
+        log.info(f"Validating data extraction from TDT block with downsampling x{self.downsample}...")
+
         if len(self.metadata['missing_events']) != 0:
             log.warning(f"Requested events {self.metadata['missing_events']} are missing")
         if align_to in self.metadata['missing_events']:
@@ -263,40 +288,42 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
         self.preprocess_signal(
             cutoff_frequency=cutoff_frequency, 
             order=order, 
-            method=preprocess_method, 
-            normalization=preprocess_normalization,
-            c=c,
+            iso_correction_method=iso_correction_method, 
+            signal_normalization=signal_normalization,
             maxiter=maxiter,
+            c=c,
+            detrend_bleaching=detrend_bleaching,
         )
         log.info(f"Done. Fitted isosbestic R2 = {self.metadata['isosbestic_fit']['r2_val']:.4f}")
 
         # step 3: extract per-trial data
         log.info(f"Extracting per-trial data...")
-        self.trials, self.baselines = self.extract_trial_data(
+        self.extract_trial_data(
             align_to=align_to,
             center_on=center_on,
             trial_bounds=trial_bounds,
             baseline_bounds=baseline_bounds,
             event_tolerences=event_tolerences,
-            normalization=normalization,
+            trial_normalization=trial_normalization,
             time_error_threshold=time_error_threshold,
             poor_signal_threshold=poor_signal_threshold,
             check_overlap=check_overlap,
+            event_conflict_logic=event_conflict_logic,
         )
-        log.info(f"Done. Extracted {self.trials.n_trials} trials of {self.trials.n_times} size each.")
+        log.info(f"Done. Extracted {self.trial_data.n_trials} trials of {self.trial_data.n_times} size each.")
 
         # step 4: annotate and clean per-trial data
         log.info(f"Annotating and cleaning trial data...")
-        self.trials.label_trials()
-        self.trials.label_blocks(
+        self.trial_data.label_trials()
+        self.trial_data.label_blocks(
             n_blocks=n_blocks, free_trial_slices=free_trial_slices, block_labels=block_labels
         )
-        self.trials.quality_control(drop=qc_drop)
+        self.trial_data.quality_control(drop=qc_drop)
 
         # step 5: pass down important metadata
-        self.trials.add_obs_columns(self.metadata, keys=['rat', 'box', 'current', 'date', 'uid'])
-        if to_trim is not None: self.trials.drop_obs_columns(to_drop=to_trim)
-        log.info(f"Done. {self.trials.n_trials} trials remain.")
+        self.trial_data.add_obs_columns(self.metadata, keys=['rat', 'box', 'current', 'date', 'uid'])
+        if to_trim is not None: self.trial_data.drop_obs_columns(to_drop=to_trim)
+        log.info(f"Done. {self.trial_data.n_trials} trials remain.")
 
         if self.poorSignalFlag:
             log.warning(f"Warning: Poor signal quality detected in {self.id}.")
@@ -306,30 +333,32 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
     # --- trial windowing ---
     def extract_trial_data( # type: ignore
         self,
-        align_to: str = 'Hsl',
-        center_on: list[str] = ['Lrg', 'Sml'],
-        trial_bounds: Tuple[float, float] = (-23.0, 5.0),
-        baseline_bounds: Tuple[float, float] = (-5, -1),
-        event_tolerences: Dict[str, Tuple[float, float]] = {'Lrg' : (5, 18), 'Sml' : (5, 18), 'Zap': (4.5, 18.5)},
-        normalization: Literal['zscore', 'zero', 'none'] = 'none',
+        align_to: str,
+        center_on: list[str],
+        trial_bounds: tuple[float, float],
+        baseline_bounds: tuple[float, float] | None = None,
+        event_tolerences: dict[str, tuple[float, float]] = {},
+        trial_normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] = 'none',
         check_overlap: bool = False,
+        event_conflict_logic: Literal['first', 'last', 'mean'] = 'first',
         poor_signal_threshold: float = 0.075,
         time_error_threshold: float = 0.01,
-    ) -> Tuple["RDT_PhotometryData", "RDT_PhotometryData"]:
+    ) -> None:
         """
         Extract trial and baseline windows for RDT and return PhotometryData objects.
         Args:
-            align_to (str): Event label used to align trials.
-            center_on (list[str]): Event labels used to refine trial centers.
-            trial_bounds (tuple[float, float]): Trial window bounds relative to center.
-            baseline_bounds (tuple[float, float]): Baseline window bounds relative to center.
-            event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation.
-            normalization (Literal['zscore', 'zero', 'none']): Trial normalization method.
+            align_to (str): Event label used to align and identify trial, should be one per trial.
+            center_on (list[str]): Event labels to center trial windows on.
+            trial_bounds (list[float, float]): Trial window bounds relative to ``center_on`` events.
+            baseline_bounds (list[float, float]): Baseline window bounds relative to ``align_to`` event.
+            event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation, relative to ``align_to``.
+            trial_normalization (Literal['zscore', 'zero', 'none']): Normalization method for trial signals based on baselines.
             check_overlap (bool): Whether to throw an error multiple ``center_on`` events are found in the same trial.
+            event_conflict_logic (Literal['first', 'last', 'mean']): Logic for choosing center on event timestamps if multiple of the same event are present.
             poor_signal_threshold (float): Threshold for poor signal checking.
             time_error_threshold (float): Threshold on timing error for sanity check.
         Returns:
-            tuple[RDT_PhotometryData, RDT_PhotometryData]: Trials and baselines as RDT_PhotometryData objects.
+            None.
         """        
         # trim last Hsl event (I believe it is a dumby event)
         self.events[align_to] = self.events[align_to][:-1]
@@ -341,55 +370,49 @@ class RDT_PhotometryExperiment(PhotometryExperiment):
             trial_bounds=trial_bounds,
             baseline_bounds=baseline_bounds,
             event_tolerences=event_tolerences,
-            normalization=normalization,
+            trial_normalization=trial_normalization,
             check_overlap=check_overlap,
             time_error_threshold=time_error_threshold,
+            event_conflict_logic=event_conflict_logic
         )
 
+        # check for poor signal
         self.poorSignalFlag = self.median_centered_abs_max_check(
             self.raw_trial_signal, 
             threshold=poor_signal_threshold
         )
 
+        # convert trial_data to RDT_PhotometryData
+        self.trial_data = RDT_PhotometryData(adata=self.trial_data.adata) # type: ignore
+
+        # add relevant meta data to trial data
         n_trials = len(self.events[align_to])
-        trial_num = np.arange(n_trials) + 1
 
-        trial_obs = pd.DataFrame(self.trial_events)
-        trial_obs['trial_num'] = trial_num
-        trial_obs['poorSignalFlag'] = self.poorSignalFlag
-        baseline_obs = pd.DataFrame(self.baseline_events)
-        baseline_obs['trial_num'] = trial_num
+        self.trial_data.obs = (
+            self.trial_data.obs
+            .assign(
+                trial_num = np.arange(n_trials) + 1,
+                poorSignalFlag = self.poorSignalFlag,
+            )
+        )
 
-        trial_metadata = {
+        self.trial_data.uns.update({
             'aligned' : align_to,
             'lower_bound' : trial_bounds[0],
             'upper_bound' : trial_bounds[1],
             'frequency' : self.frequency,
-            'normalization' : normalization,
-        }
-        baseline_metadata = {
-            'aligned' : align_to,
-            'lower_bound' : baseline_bounds[0],
-            'upper_bound' : baseline_bounds[1],
-            'frequency' : self.frequency,
-            'normalization' : normalization,
-        }
+            'normalization' : trial_normalization,
+        })
 
-        # package results as RDT_PhotometryData objects
-        trials: "RDT_PhotometryData" = RDT_PhotometryData.from_arrays(
-            obs=trial_obs,
-            data=self.trial_signals,
-            time_points=self.trial_time_points,
-            metadata=trial_metadata,
-        )
-        baselines: "RDT_PhotometryData" = RDT_PhotometryData.from_arrays(
-            obs=baseline_obs,
-            data=self.baseline_signals,
-            time_points=self.baseline_time_points,
-            metadata=baseline_metadata,
-        )
-
-        return trials, baselines
+        # do the same for baselines if specified
+        if baseline_bounds is not None:
+            self.baseline_data = RDT_PhotometryData(adata=self.baseline_data.adata) # type: ignore
+            self.baseline_data.uns.update({
+                'aligned' : align_to,
+                'lower_bound' : baseline_bounds[0],
+                'upper_bound' : baseline_bounds[1],
+                'frequency' : self.frequency,
+            })
         
     def parse_annotations(self, filename: str = 'annotations.json') -> None:
         """
@@ -581,26 +604,26 @@ def RDT_process_whole_directory(
                 
                 if low_memory_mode:
                     log.info(f"Saving trial data...")
-                    exp.trials.append_on_disk_h5ad(path=str(trial_data_path))
+                    exp.trial_data.append_on_disk_h5ad(path=str(trial_data_path))
                 else:
                     if i == 1:
                         log.info(f"Creating first trial object...")
-                        trial_data = RDT_PhotometryData(exp.trials.adata.copy())
+                        trial_data = RDT_PhotometryData(exp.trial_data.adata.copy())
                     else:
                         log.info(f"Appending to trial_data object...")
-                        trial_data.combine_obj(exp.trials, inplace=True)
+                        trial_data.combine_obj(exp.trial_data, inplace=True)
 
                 if save_baselines:
                     if low_memory_mode:
                         log.info(f"Saving baseline data...")
-                        exp.baselines.append_on_disk_h5ad(path=str(baseline_data_path))
+                        exp.baseline_data.append_on_disk_h5ad(path=str(baseline_data_path))
                     else:
                         if i == 1:
                             log.info(f"Creating first baseline object...")
-                            baseline_data = RDT_PhotometryData(exp.baselines.adata.copy())
+                            baseline_data = RDT_PhotometryData(exp.baseline_data.adata.copy())
                         else:
                             log.info(f"Appending to baseline_data object...")
-                            baseline_data.combine_obj(exp.baselines, inplace=True)
+                            baseline_data.combine_obj(exp.baseline_data, inplace=True)
 
                 if fit_photobleaching:
                     log.info(f"Fitting & saving photobleaching curve...")
@@ -617,7 +640,7 @@ def RDT_process_whole_directory(
                     exp.dashboard(save=save_path)
 
                 log.info(f"Experiment info for {exp.id}")
-                log.info(exp.trials.info())
+                log.info(exp.trial_data.info())
                 
                 del exp
                 i += 1

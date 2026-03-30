@@ -109,7 +109,7 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         preprocess_normalization: Literal['nullZ', 'none'] = 'none',
         c: float = 3,
         maxiter: int = 200,
-        fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept'] = 'IRLS',
+        fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
         
         align_to: str = 'OC',
         center_on: list[str] = ['OC'],
@@ -131,7 +131,7 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
             preprocess_normalization (str): Normalization for whole processed signal, 'nullZ' or 'none'.
             c (float): Tukey-biweight IRLS parameter, lower means more aggressive downweighting. 1.4 <= c <= 3 is recommended.
             maxiter (int): Maximum iterations for IRLS isosbestic to signal fitting.
-            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept']): model used to fit isosbestic.
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept']): model used to fit isosbestic.
             align_to (str): Primary event label used to align trials.
             center_on (list[str]): Events used to refine trial centers.
             trial_bounds (tuple[float, float]): Trial window bounds relative to center.
