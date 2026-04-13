@@ -19,13 +19,6 @@ from ..utils.stats import OLS_fit, IRLS_fit, fit_photobleaching
 
 class PhotometryExperiment:
     id: str
-    data_folder: str
-    notes_filename: str
-    box: str
-    signal_label: str
-    isosbestic_label: str
-    event_labels: list[str]
-
     metadata: dict[str, Any]
     events: dict[str, np.ndarray]
     raw_signal: np.ndarray
@@ -42,17 +35,19 @@ class PhotometryExperiment:
             raw_signal: np.ndarray,
             raw_isosbestic: np.ndarray,
             time: np.ndarray,
-            frequency: float,
+            frequency: float | None = None,
             events: dict = {},
             metadata: dict = {},
             ):
         self.raw_signal = raw_signal
         self.raw_isosbestic = raw_isosbestic
         self.time = time
-        self.frequency = frequency
         self.events = events
         self.metadata = metadata
+
+        self.frequency = raw_signal.size / (self.time.max() - self.time.min()) if frequency is None else frequency
         self.metadata['frequency'] = frequency
+
 
     # --- import methods ---
     @classmethod
@@ -148,8 +143,6 @@ class PhotometryExperiment:
             if detrend_bleaching:
                 filt_sig = self.detrend_photobleching(filt_sig)
                 filt_iso = self.detrend_photobleching(filt_iso)
-                self.detrend_sig = filt_sig.copy()
-                self.detrend_iso = filt_iso.copy()
 
             # fit isosbestic to signal
             fitted_iso, r2_val, coeff = self.fit_isosbestic_to_signal(
@@ -163,7 +156,12 @@ class PhotometryExperiment:
             self.metadata['isosbestic_fit'] = {'r2_val' : r2_val, 'coeffs' : coeff}
             self.fitted_isosbestic = fitted_iso
         else:
+            filt_iso = None
             fitted_iso = None
+        
+        # save processed signals
+        self.processed_sig = filt_sig.copy()
+        self.processed_iso = filt_iso.copy()
 
         # procesing / normalization methods
         self.metadata['signal_processing_method'] = iso_correction_method 
@@ -401,7 +399,7 @@ class PhotometryExperiment:
             self,
             signal: np.ndarray, 
             window_dur: float =  5,
-            ) -> tuple[np.ndarray, pd.DataFrame]:
+            ) -> tuple[np.ndarray, list[float]]:
         """
         Fit a negative bi-exponential to photobleaching trend in raw signal and isosbestic
         using a sliding window median downsampling scheme.
@@ -415,12 +413,8 @@ class PhotometryExperiment:
         fitted_curve, params = fit_photobleaching(signal, self.time, window=window_len)
         r2_val = r2_score(signal, fitted_curve)
         mse_val = mean_squared_error(signal, fitted_curve)
-
-        row = {'id': self.id, 
-               'a1': params[0], 'b1': params[1], 'a2': params[2], 'b2': params[3], 'c': params[4],
-               'r2_val': r2_val, 'mse_val': mse_val}
         
-        return fitted_curve, pd.DataFrame([row])
+        return fitted_curve, params
     
     # --- extraction of trial-wise data ---
     def find_interval_bounds(self, series: np.ndarray, centers: np.ndarray, bounds: tuple[int, int]) -> np.ndarray:
@@ -616,8 +610,7 @@ class PhotometryExperiment:
 
         # annotate
         ax1.set_title(
-        f"Dashboard for {getattr(self, 'id', 'Unnamed')}\n"
-        f"Origin: {self.data_folder.split('/')[-1]}"
+        f"Dashboard for {getattr(self, 'id', 'Unnamed')}"
         )
         ax1.set_ylabel('Signal amplitude (a.u.)')
         ax2.set_ylabel(f"{self.metadata.get('signal_processing_method', 'NOT FOUND')}")

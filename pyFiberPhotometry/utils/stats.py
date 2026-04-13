@@ -109,15 +109,6 @@ def fit_photobleaching(
     # robust residual scale
     sigma0 = mad_std(sig_reduced - bleach0)
 
-    # initial parameters
-    init_guess = [
-        sig_reduced[0] - sig_reduced[-1], # a1
-        10 / (time_reduced[-1] - time_reduced[0]), # b1
-        (sig_reduced[0] - sig_reduced[-1]) / 2, # a2
-        2 / (time_reduced[-1] - time_reduced[0]) / 2, # b2
-        sig_reduced[-1], # c
-    ]
-
     # construct bounds
     T = time.max() - time.min()
     ymin, ymax = signal.min(), signal.max()
@@ -127,6 +118,20 @@ def fit_photobleaching(
         [0, 5/T, 0, 0.1/T, ymin - yrange],
         [5*yrange, 1000/T, 5*yrange, 10/T, ymax + yrange]
     )
+
+    # initial parameters
+    init_guess = [
+        sig_reduced[0] - sig_reduced[-1], # a1
+        10 / (time_reduced[-1] - time_reduced[0]), # b1
+        (sig_reduced[0] - sig_reduced[-1]) / 2, # a2
+        2 / (time_reduced[-1] - time_reduced[0]) / 2, # b2
+        sig_reduced[-1], # c
+    ]
+
+    # clip initial guesses to bounds
+    for i, (guess, lower, upper) in enumerate(zip(init_guess, bounds[0], bounds[1])):
+        print(i, guess, lower, upper)
+        init_guess[i] = float(np.clip(guess, lower, upper))
 
     res = least_squares(
         residuals,

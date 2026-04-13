@@ -157,6 +157,8 @@ class PhotometryData:
     def n_trials(self) -> int: return self.adata.n_obs
     @property
     def n_times(self) -> int: return self.adata.n_vars
+    @ property
+    def freq(self) -> float: return self.n_times / (self.ts[-1] - self.ts[0])
 
     # --- conveience setters ---
     @X.setter
@@ -352,14 +354,15 @@ class PhotometryData:
         # calculate minimum window size to ensure stable sizes
         target_len = np.floor((bounds[1] - bounds[0]) * freq).astype(int)
         window_idxs = left_idxs[:, None] + np.arange(target_len)[None, :]
+        window_idxs = np.clip(window_idxs, a_min=0, a_max=self.n_times - 1)
         return window_idxs
 
     def window(
         self,
-        series: np.ndarray,
         centers: np.ndarray | float | int,
         bounds: tuple[float, float],
-        freq: float,
+        freq: float | None = None,
+        series: np.ndarray | None = None,
         event_cols: list[str] | None = None,
         ) -> "PhotometryData":
         """
@@ -375,7 +378,9 @@ class PhotometryData:
         """
         if isinstance(centers, (float, int)): 
             centers = np.full(shape=self.X.shape[0], fill_value=centers, dtype=float)
-        series = np.asarray(series)
+
+        series = self.ts if series is None else np.asarray(series)
+        freq = self.freq if freq is None else float(freq)
         centers = np.asarray(centers)
 
         window_idxs = self.get_window_idxs(series=series, centers=centers, bounds=bounds, freq=freq)

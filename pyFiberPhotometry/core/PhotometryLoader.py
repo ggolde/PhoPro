@@ -107,3 +107,12 @@ class TDTLoader(PhotometryLoader):
                 events[label] = np.array([], dtype=float)
                 self.metadata['missing_events'].append(label)
         return events
+    
+class CSVLoader(PhotometryLoader):
+    def __init__(
+            self,
+            signal_csv: str,
+            isosbestic_signal_file: str | None = None,
+            events: str | None = None,
+        ) -> None:
+        pass

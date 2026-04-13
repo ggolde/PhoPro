@@ -5,14 +5,21 @@ from collections import deque
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 import json
 import os
 import re
 import logging
 
-from ..core import PhotometryData, PhotometryExperiment
+from ..core import PhotometryData, PhotometryExperiment, TDTLoader
+from ..analysis.artifact import detect_artifacts_two_channel_ODS, intervals_to_flat_idx
+
 
 class SUGA_PhotometryExperiment(PhotometryExperiment):
+    artifact_df: pd.DataFrame
+    artifact_info: dict[str, float]
+
     """
     SUGA-specific implementation of PhotometryExperiment for TDT-based SUGA sessions.
     """
@@ -20,10 +27,12 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         self,
         data_folder: str,
         box: str = "A",
-        event_labels: list[str] = ["OC", "CC"],
+        event_labels: list[str] = [],
         signal_label: str = "_500",
         isosbestic_label: str = "_450",
         annot_filename: str = "annotations.json",
+        downsample: int = 10,
+        trim_first: int = 1000,
         ):
         """
         Initialize an SUGA_PhotometryExperiment.
@@ -34,12 +43,33 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
             signal_label (str): Base label for the signal stream.
             isosbestic_label (str): Base label for the isosbestic stream.
             annot_filename (str): File name of the notes file in the data folder.
+            downsample (int): factor to downsample raw signals by.
         Returns:
             SUGA_PhotometryExperiment
         """
-        super().__init__(data_folder, box, event_labels, signal_label, isosbestic_label, annot_filename)
+        loader = TDTLoader(
+            data_folder=data_folder,
+            box=box,
+            event_labels=event_labels,
+            signal_label=signal_label,
+            isosbestic_label=isosbestic_label,
+            downsample=downsample,
+        )
 
-        self.parse_annotations(self.notes_filename)
+        super().__init__(**loader.extract_data())
+
+        self.raw_signal = self.raw_signal[trim_first:]
+        self.raw_isosbestic = self.raw_isosbestic[trim_first:]
+        self.time = self.time[trim_first:]
+
+        self.data_folder = data_folder
+        self.box = box
+        self.event_labels = event_labels
+        self.signal_label = signal_label
+        self.isosbestic_label = isosbestic_label
+        self.annot_filename = annot_filename
+
+        self.parse_annotations(annot_filename)
         self.metadata['folder'] = self.data_folder
         self.id = (
             f"{self.metadata.get('rat', 'UnknownRat')}_"
@@ -78,25 +108,9 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         if (rat is None) or (treatment is None):
             raise ValueError(f'Rat or treatment not found in notes file')
         
-    def extract_events(self, tdt_obj) -> dict:
-        '''
-        Get event timestamps from `self.metadata`.
-
-        Args:
-            tdt_obj (tdt): Unused, events taken from `self.metadata`.
-        Returns:
-            events (dict): dictionary containing events and event timestamps as np.ndarray's.
-        '''
-        events = {}
-        self.metadata['missing_events'] = []
-        for label in self.event_labels:
-            # some sessions may lack a label entirely if no events are recorded
-            if self.metadata.get(label, None) is not None:
-                events[label] = np.asarray([self.metadata[label]], dtype=float)
-            else:
-                events[label] = np.array([], dtype=float)
-                self.metadata['missing_events'].append(label)
-        return events
+        # assign events
+        self.events['OC'] = np.asarray([self.metadata['OC']])
+        self.events['CC'] = np.asarray([self.metadata['CC']])
     
     # --- pipeline API ---
     def run_pipeline(
@@ -110,13 +124,14 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         c: float = 3,
         maxiter: int = 200,
         fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
+        detrend_bleaching: bool = False,
         
         align_to: str = 'OC',
         center_on: list[str] = ['OC'],
         trial_bounds: tuple[float, float] = (-100.0, 3000.0),
         baseline_bounds: tuple[float, float] = (-100, -10),
         event_tolerences: dict[str, tuple[float, float]] = {'CC':(-1000.0, 1000.0)},
-        normalization: Literal['zscore', 'zero', 'none'] = 'zero',
+        trial_normalization: Literal['zscore', 'zero', 'none'] = 'zero',
         check_overlap: bool = False,
         time_error_threshold: float = 0.01,
         ) -> None:
@@ -149,10 +164,9 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         
         # step 1: extract raw data from TDT
         log.info(f"Extracting raw data from TDT block, downsampling x{downsample}...")
-        self.extract_data(downsample=downsample)
         if len(self.metadata['missing_events']) != 0:
             log.warning(f"Requested events {self.metadata['missing_events']} are missing")
-        if align_to in self.metadata['missing_events']:
+        if align_to not in self.events.keys():
             raise ValueError(f'There are no {align_to} events present in data!')
 
         # step 2: preprocess signal with lowpass filter and dF/F strategy
@@ -160,11 +174,12 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         self.preprocess_signal(
             cutoff_frequency=cutoff_frequency, 
             order=order, 
-            method=preprocess_method, 
-            normalization=preprocess_normalization,
+            iso_correction_method=preprocess_method, 
+            signal_normalization=preprocess_normalization,
             c=c,
             maxiter=maxiter,
             fit_using=fit_using,
+            detrend_bleaching=detrend_bleaching
         )
         log.info(f"Done. Fitted isosbestic R2 = {self.metadata['isosbestic_fit']['r2_val']:.4f}")
 
@@ -176,7 +191,7 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
             trial_bounds=trial_bounds,
             baseline_bounds=baseline_bounds,
             event_tolerences=event_tolerences,
-            normalization=normalization,
+            trial_normalization=trial_normalization,
             time_error_threshold=time_error_threshold,
             check_overlap=check_overlap,
         )
@@ -188,16 +203,94 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
 
         log.info(f"Done. {self.trial_data.n_trials} trials remain.")
         log.info(f"Pipeline complete.")
+
+    # --- artifact ---
+    def detect_artifacts(
+            self,
+            score_threshold: float = 10,
+            expand_left_sec: float = 1,
+            expand_right_sec: float = 1,
+            buffer_sec: float = 2,
+            jump_artifact_cutoff: float = 20,
+            ignore_first_n: int = 1000,
+            iso_cor_cutoff: float = 0.7,
+            norm_before: Literal['none', 'zscore'] = 'none',
+            n_chunks: int = 100,
+            detrend: bool = True,
+            ) -> None:
+        
+        sig = self.processed_sig.copy()
+        iso = self.fitted_isosbestic.copy()
+
+        if detrend:
+            sig = self.detrend_photobleching(sig, 5)
+            iso = self.detrend_photobleching(iso, 5)
+        
+        match norm_before:
+            case 'none':
+                pass
+            case 'zscore':
+                sig = (sig - sig.mean()) / sig.std()
+                iso = (iso - iso.mean()) / iso.std()
+
+        df = detect_artifacts_two_channel_ODS(
+            signal = sig[ignore_first_n:],
+            isosbestic = iso[ignore_first_n:],
+            time = self.time[ignore_first_n:],
+            score_threshold = score_threshold,
+            expand_left_sec = expand_left_sec,
+            expand_right_sec = expand_right_sec,
+            buffer_sec = buffer_sec,
+            jump_artifact_cutoff = jump_artifact_cutoff,
+            n_chunks=n_chunks,
+        )
+        df = df.loc[df['isosbestic_cor'] >= iso_cor_cutoff]
+        self.artifact_df = df
+
+        info = {}
+        info['artifact_score'] = self.calc_artifact_score()
+        info['n_artifacts'] = df.shape[0]
+        info['n_jumps'] = df.loc[df['type'] == 'jump'].sum()
+        info['n_spikes'] = df.loc[df['type'] == 'spike'].sum()
+
+        self.metadata.update(info)
+        self.art_sig = sig.copy()
+        self.art_iso = iso.copy()
+
+    def calc_artifact_score(self) -> float:
+        return np.sum(self.artifact_df['duration'] * self.artifact_df['amplitude'].abs())
+    
+    def plot_with_artifacts(self, ax = None):
+        if ax is None:
+            fig, ax = plt.subplots()
+        
+        ax.plot(self.time, self.art_sig, c='tab:blue', label='Exp', zorder=1)
+        ax.plot(self.time, self.art_iso, c='tab:orange', label='Iso', zorder=0)
+        
+        df = self.artifact_df
+        spike_bounds = df.loc[df['type'] == 'spike', ['start_idx', 'stop_idx']].to_numpy()
+        jump_bounds = df.loc[df['type'] == 'jump', ['start_idx', 'stop_idx']].to_numpy()
+
+        spike_idxs = intervals_to_flat_idx(spike_bounds)
+        jump_idxs = intervals_to_flat_idx(jump_bounds)
+
+        ax.scatter(self.time[spike_idxs], self.art_sig[spike_idxs], color='tab:red', label='Spike', zorder=2, s=2)
+        ax.scatter(self.time[jump_idxs], self.art_sig[jump_idxs], color='pink', label='Jump', zorder=2, s=2)
+
+        return ax
     
 def SUGA_process_whole_directory(
     data_dir: str,
     output_dir: str,
     log_file: str | None = None,
     save_dashboards: bool = False,
+    detect_artifacts: bool = False,
 
     trial_data_file: str = 'trials.h5ad',
+    artifact_file: str = 'artifacts.csv',
     dashboard_folder: str = 'dashboard_plots',
 
+    downsample: int = 20,
     boxes: list[str] = ['A', 'B'],
     event_labels: list[str] = ('OC', 'CC'),
     signal_label: str = '_500',
@@ -205,6 +298,7 @@ def SUGA_process_whole_directory(
     annotation_filename: str = 'annotations.json',
 
     pipeline_kwargs: dict[str, Any] = {},
+    artifact_kwargs: dict[str, Any] = {},
     ) -> PhotometryData:
     """
     Runs full RDT pipeline on all folders in a directory and combines the results.
@@ -241,6 +335,7 @@ def SUGA_process_whole_directory(
     # concat savefiles
     trial_data_path = os.path.join(output_dir, trial_data_file)
     dashboard_folder_abs = os.path.join(output_dir, dashboard_folder)
+    artifact_path = os.path.join(output_dir, artifact_file)
 
     # delete previous files (only if they are not folders)
     for path in [trial_data_path]:
@@ -256,8 +351,9 @@ def SUGA_process_whole_directory(
     i = 1    
 
     trial_data: PhotometryData = None
+    artifact_dfs: list[pd.DataFrame] = []
 
-    # loop through every TDT folder add box
+    # loop through every TDT folder and box
     for tdt_folder in tdt_folders_list:
         for box in boxes:
             log.info(f"Processing {tdt_folder}, box {box} ({i} / {n_experiments})...")
@@ -268,12 +364,28 @@ def SUGA_process_whole_directory(
                     event_labels=event_labels,
                     signal_label=signal_label,
                     isosbestic_label=isosbestic_label,
-                    annot_filename=annotation_filename
-                    )
+                    annot_filename=annotation_filename,
+                    downsample=downsample,
+                )
                 exp.run_pipeline(
                     logger=log,
                     **pipeline_kwargs
+                )
+                log.info(f"Finished processing.")
+
+                if detect_artifacts:
+                    log.info(f"Detecting artifacts...")
+
+                    exp.detect_artifacts(
+                        **artifact_kwargs
                     )
+                    exp.trial_data.add_obs_columns(
+                        add_from=exp.metadata,
+                        keys=['artifact_score', 'n_artifacts', 'n_jumps', 'n_spikes']
+                    )
+
+                    log.info(f"{exp.metadata['n_artifacts']} artifacts detected with score of {exp.metadata['artifact_score']}")
+                    artifact_dfs.append(exp.artifact_df.assign(uid=exp.id))
                 
                 if i == 1:
                     log.info(f"Creating first trial object...")
@@ -300,12 +412,18 @@ def SUGA_process_whole_directory(
 
             except Exception as e:
                 n_errors += 1
-                log.error(f"Error processing {tdt_folder}, box {box}: \n\t {e}\n")
+                log.error(f"Error processing {tdt_folder}, box {box}: \n\t {e}")
+                log.error(e, exc_info=True)
                 i += 1
                 continue
 
     log.info('Saving trial data...')
     trial_data.write_h5ad(trial_data_path)
+
+    if detect_artifacts:
+        log.info(f"Saving artifact information...")
+        artifact_df = pd.concat(artifact_dfs)
+        artifact_df.to_csv(artifact_path, index=False)
 
     log.info(
         f'Data processing complete with {n_errors} errors '
