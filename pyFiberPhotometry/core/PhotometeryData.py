@@ -14,17 +14,16 @@ from ..utils.ops import downsample_ndarray, downsample_1d, reconstruct_time_poin
 ad.settings.allow_write_nullable_strings = True
 
 class PhotometryData:
-    """
-    Wrap an AnnData object for trial-wise photometry time-series data.
-    """
+    """Wrap an AnnData object for trial-wise photometry time-series data."""
     adata: ad.AnnData
 
     # --- constructors ---
     def __init__(self, adata: ad.AnnData):
-        """
-        Initialize a PhotometryData wrapper from an AnnData object.
+        """Initialize a `PhotometryData` wrapper from an AnnData object.
+
         Args:
-            adata (anndata.AnnData): AnnData object containing time-series data.
+            adata (ad.AnnData): AnnData object containing time-series data.
+
         Returns:
             None
         """
@@ -40,16 +39,19 @@ class PhotometryData:
         layers: dict[str, np.ndarray] | None = None,
         metadata: dict[str, Any] | None = None,
         ) -> "PhotometryData":
-        """
-        Construct PhotometryData from arrays and observation metadata.
+        """Construct `PhotometryData` from arrays and observation metadata.
+
         Args:
             obs (pd.DataFrame): Per-trial observation metadata.
             data (np.ndarray): Time-series data of shape (n_trials, n_time).
             time_points (np.ndarray): Time axis of shape (n_time,).
-            layers (dict[str, np.ndarray] | None): Optional named layers matching shape of data.
-            metadata (dict[str, Any] | None): Optional unstructured metadata stored in .uns.
+            layers (dict[str, np.ndarray] | None, optional): Optional named
+                layers matching the shape of ``data``. Defaults to ``None``.
+            metadata (dict[str, Any] | None, optional): Optional unstructured
+                metadata stored in ``.uns``. Defaults to ``None``.
+
         Returns:
-            PhotometryData
+            PhotometryData: Constructed photometry data object.
         """
         obs = obs.copy()
         obs.reset_index(drop=True, inplace=True)
@@ -66,52 +68,67 @@ class PhotometryData:
     # --- I/O ---
     @classmethod
     def read_h5ad(cls, path: str) -> "PhotometryData":
-        """
-        Read a PhotometryData object from an .h5ad file.
+        """Read a `PhotometryData` object from an `.h5ad` file.
+
         Args:
-            path (str): Path to the .h5ad file.
+            path (str): Path to the `.h5ad` file.
+
         Returns:
-            PhotometryData: Loaded PhotometryData instance.
-        """        
+            PhotometryData: Loaded `PhotometryData` instance.
+        """
         return cls(ad.read_h5ad(path))
+    
     @classmethod
     def read_zarr(cls, path: str) -> "PhotometryData":
-        """
-        Read a PhotometryData object from zarr storage.
+        """Read a `PhotometryData` object from zarr storage.
+
         Args:
             path (str): Path to the zarr storage.
+
         Returns:
-            PhotometryData: Loaded PhotometryData instance.
-        """      
+            PhotometryData: Loaded `PhotometryData` instance.
+        """
         return cls(ad.read_zarr(path))
     
     def write_h5ad(self, path: str) -> None:
-        """
-        Write the underlying AnnData to an .h5ad file.
+        """Write the underlying AnnData to an `.h5ad` file.
+
         Args:
-            path (str): Path to the output .h5ad file.
+            path (str): Path to the output `.h5ad` file.
+
         Returns:
             None
-        """        
-        self.adata.write_h5ad(path)
-    def write_zarr(self, path: str) -> None:
         """
-        Write the underlying AnnData to zarr storage.
+        self.adata.write_h5ad(path)
+
+    def write_zarr(self, path: str) -> None:
+        """Write the underlying AnnData to zarr storage.
+
         Args:
             path (str): Path to the output zarr storage.
+
         Returns:
             None
-        """     
+        """
         self.adata.write_zarr(path)
 
     def append_on_disk_h5ad(self, path: str, join: str = 'inner', merge: str = 'same', uns_merge: str = 'first') -> None:
-        """
-        Append this object's data to an existing .h5ad file on disk or create it if it does not exist.
+        """Append this object's data to an existing `.h5ad` file on disk.
+
+        Creates the file if it does not already exist.
+
         Args:
-            path (str): Path to the target .h5ad file.
+            path (str): Path to the target `.h5ad` file.
+            join (str, optional): How to align values when concatenating.
+                Defaults to ``'inner'``.
+            merge (str, optional): How elements not aligned to the concatenated
+                axis are selected. Defaults to ``'same'``.
+            uns_merge (str, optional): How the elements of ``.uns`` are
+                selected. Defaults to ``'first'``.
+
         Returns:
             None
-        """        
+        """
         if not os.path.exists(path):
             self.write_h5ad(path)
             return
@@ -158,7 +175,7 @@ class PhotometryData:
     @property
     def n_times(self) -> int: return self.adata.n_vars
     @ property
-    def freq(self) -> float: return self.n_times / (self.ts[-1] - self.ts[0])
+    def freq(self) -> float: return self.n_times / (self.ts[-1] - self.ts[0] + 1)
 
     # --- conveience setters ---
     @X.setter
@@ -179,13 +196,19 @@ class PhotometryData:
             collapse_cols: list[str] | None = None,
             count_col: str | None = None
             ) -> tuple[pd.DataFrame, np.ndarray]:
-        """
-        Aggregate X and selected obs columns over groups.
+        """Aggregate `X` and selected `obs` columns over groups.
+
         Args:
-            method (callable): Aggregation function applied along axis 0.
-            group_on (list[str]): Columns in obs used to define groups.
+            method (Callable[..., np.ndarray]): Aggregation function applied
+                along axis 0.
+            group_on (list[str] | None): Columns in ``obs`` used to define
+                groups, if None, all data is collapsed.
             data_cols (list[str]): Observation columns to aggregate.
-            count_col (str | None): Optional column name to store group counts.
+            collapse_cols (list[str] | None, optional): Optional columns to
+                collapse into lists. Defaults to ``None``.
+            count_col (str | None, optional): Optional column name to store
+                group counts. Defaults to ``None``.
+
         Returns:
             tuple[pd.DataFrame, np.ndarray]: Aggregated obs and X arrays.
         """
@@ -230,6 +253,14 @@ class PhotometryData:
 
     # --- operations ---
     def downsample(self, factor: int) -> "PhotometryData":
+        """Downsample the time dimension of the dataset.
+
+        Args:
+            factor (int): Downsampling factor applied along the time axis.
+
+        Returns:
+            PhotometryData: New downsampled photometry data object.
+        """
         X_new = downsample_ndarray(self.adata.X, factor=factor, axis=1)
         t_new = downsample_1d(self.var['t'].to_numpy(), factor=factor)
         layers_new = {k : downsample_ndarray(v, factor=factor, axis=1) for k, v in self.adata.layers.items()}
@@ -255,22 +286,32 @@ class PhotometryData:
             merge: str ='same', 
             uns_merge: str = 'same'
             ) -> None | PhotometryData:
-        """
-        Concatenate the rows of object with one or more PhotometryData objects.
+        """Concatenate this object with one or more `PhotometryData` objects.
+
         Args:
             to_append (PhotometryData | list[PhotometryData]): Object(s) to append.
-            inplace (bool) : Whether to modify the original object or return new merged one.
-            join (str) : How to align values when concatenating. If "outer", the union of the other axis is taken. If "inner", the intersection.
-            merge (str) : How elements not aligned to the axis being concatenated along are selected. Currently implemented strategies include:
+            inplace (bool, optional): Whether to modify the original object or
+                return a new merged one. Defaults to ``False``.
+            join (str, optional): How to align values when concatenating. If
+                ``"outer"``, the union of the other axis is taken. If
+                ``"inner"``, the intersection. Defaults to ``'inner'``.
+            merge (str, optional): How elements not aligned to the axis being
+                concatenated along are selected. Currently implemented
+                strategies include:
                 None: No elements are kept.
                 'same': Elements that are the same in each of the objects.
                 'unique': Elements for which there is only one possible value.
                 'first': The first element seen at each from each position.
                 'only': Elements that show up in only one of the objects.
-            uns_merge (str) : How the elements of `.uns` are selected. Uses the same set of strategies as the merge argument, except applied recursively.
+                Defaults to ``'same'``.
+            uns_merge (str, optional): How the elements of ``.uns`` are
+                selected. Uses the same set of strategies as the ``merge``
+                argument, except applied recursively. Defaults to ``'same'``.
+
         Returns:
-            Combined PhotometryData or None depending on ``inplace``.
-        """        
+            None | PhotometryData: Combined `PhotometryData` or ``None``
+                depending on ``inplace``.
+        """
         if not isinstance(to_append, list):
             to_append = [to_append]
 
@@ -302,18 +343,28 @@ class PhotometryData:
             collapse_cols: list[str] | None = None,
             count_col: str | None = 'n'
             ) -> "PhotometryData":
-        """
-        Collapse trials by grouping obs and aggregating X and selected obs columns.
+        """Collapse trials by grouping `obs` and aggregating data.
+
         Args:
-            group_on (list[str]): Columns in obs used to define groups, if None or [] it will fully collapse the data.
-            method (callable): Aggregation function for the main X matrix.
-            metrics (dict[str, callable]): Additional named aggregation functions stored as layers.
+            group_on (list[str] | None): Columns in ``obs`` used to define
+                groups. If ``None`` or ``[]``, the data is fully collapsed.
+            method (Callable, optional): Aggregation function for the main
+                ``X`` matrix. Defaults to ``np.nanmean``.
+            metrics (dict[str, Callable], optional): Additional named
+                aggregation functions stored as layers. Defaults to
+                ``{'std': np.std}``.
             data_cols (list[str]): Observation columns to aggregate with each method.
-            collapse_cols (list[str] | None): Optional, columns to collapse to lists.
-            count_col (str | None): Optional, column name to store group counts.
+            collapse_cols (list[str] | None, optional): Optional columns to
+                collapse to lists. Defaults to ``None``.
+            count_col (str | None, optional): Optional column name to store
+                group counts. If ``None``, no ``count_col`` is made.
+                Defaults to ``'n'``.
+
         Returns:
-            PhotometryData.
-        """        
+            PhotometryData: Collapsed photometry data object. Metrics are 
+                also applied to ``data_cols`` with the metric key appended
+                to column name (ex: ``'trial_std'``).
+        """
         obs_agg, X_agg = self._agg(method=method, group_on=group_on, data_cols=data_cols, count_col=count_col, collapse_cols=collapse_cols)
 
         layers = {}
@@ -331,22 +382,25 @@ class PhotometryData:
         )
         return new_obj
     
-    def get_window_idxs(
+    def _get_window_idxs(
             self, 
             series: np.ndarray, 
             centers: np.ndarray, 
             bounds: tuple[int, int], 
             freq: float
             ) -> np.ndarray:
-        """
-        Get indexs for windows centered around ``centers``.
+        """Get indexes for windows centered around ``centers``.
+
         Args:
-            series (np.ndarray): Time-like sorted series that windows will be calculated in.
-            centers (np.ndarray): The specified centers of the windows in same units as ``series``.
-            bounds (np.ndarray): Specify the lower and upper bounds of the windows.
+            series (np.ndarray): Time-like sorted series that windows will be
+                calculated in.
+            centers (np.ndarray): Specified window centers in the same units as
+                ``series``.
+            bounds (tuple[int, int]): Lower and upper bounds of the windows.
             freq (float): The frequency of ``series``.
+
         Returns:
-            2D np.ndarray of window indexes.
+            np.ndarray: Two-dimensional array of window indexes.
         """
         low, high = bounds
         left_idxs = np.searchsorted(series, centers + low, side='left')
@@ -365,16 +419,23 @@ class PhotometryData:
         series: np.ndarray | None = None,
         event_cols: list[str] | None = None,
         ) -> "PhotometryData":
-        """
-        Return new PhotometryData object whose time series has been windowed.
+        """Return a new `PhotometryData` object with windowed time series.
+
         Args:
-            series (np.ndarray): Time-like sorted series that windows will be calculated in.
-            centers (np.ndarray): The specified centers of the windows in same units as ``series``.
-            bounds (np.ndarray): Specify the lower and upper bounds of the windows.
-            freq (float): The frequency of ``series``.
-            event_cols (list[str]): Columns of self.adata.obs to be centered to ``centers``.
+            centers (np.ndarray | float | int): Specified centers of the
+                windows in the same units as ``series``.
+            bounds (tuple[float, float]): Lower and upper bounds of the
+                windows.
+            freq (float | None, optional): Frequency of ``series``. If
+                ``None``, ``self.freq`` is used. Defaults to ``None``.
+            series (np.ndarray | None, optional): Time-like sorted series that
+                windows will be calculated in. If ``None``, ``self.ts`` is
+                used. Defaults to ``None``.
+            event_cols (list[str] | None, optional): Columns of ``self.adata.obs``
+                to re-center to ``centers``. Defaults to ``None``.
+
         Returns:
-            2D np.ndarray of window indexes.
+            PhotometryData: Windowed photometry data object.
         """
         if isinstance(centers, (float, int)): 
             centers = np.full(shape=self.X.shape[0], fill_value=centers, dtype=float)
@@ -383,7 +444,7 @@ class PhotometryData:
         freq = self.freq if freq is None else float(freq)
         centers = np.asarray(centers)
 
-        window_idxs = self.get_window_idxs(series=series, centers=centers, bounds=bounds, freq=freq)
+        window_idxs = self._get_window_idxs(series=series, centers=centers, bounds=bounds, freq=freq)
         row_slice = np.arange(self.X.shape[0])[:, None]
 
         data = self.X[row_slice, window_idxs]
@@ -405,173 +466,82 @@ class PhotometryData:
         )
         return out
     
-    # --- plotting ---
-    def plot_line(
-            self, i: int, 
-            ax: matplotlib.axes.Axes | None = None, 
-            label_with: list[str] | None = None, 
-            err_layer: str | None = None,
-            plt_kwargs: dict = {},
-        ) -> None:
-        """
-        Plot a single trial time-series with optional error band.
-        Args:
-            i (int): Trial index to plot.
-            ax (matplotlib.axes.Axes | None): Axis to plot on. Creates a new one if None.
-            label_with (list[str] | None): Obs columns used to build the legend label.
-            err_layer (str | None): Optional layer name providing per-timepoint error.
-            **kwargs: Additional keyword arguments passed to plt.plot.
-        Returns:
-            None
-        """        
-        if ax is None: fig, ax = plt.subplots()
-        
-        x = self.var['t'].to_numpy()
-        y = self.X[i, :]
-        row = self.obs.iloc[i]
-
-        if label_with is not None:
-            vals = row[label_with].astype(str).to_list()
-            name_val_pairs = [k + ': ' + v for k, v in zip(label_with, vals)]
-            label = ', '.join(name_val_pairs)
-        else:
-            label = None
-
-        ax.plot(x, y, label=label, **plt_kwargs)
-        if err_layer is not None:
-            yerr = self.adata.layers[err_layer][i]
-            ax.fill_between(x, y + yerr, y - yerr, alpha=0.3)
-
-    def plot_set(
-            self, 
-            subset: list[bool | int], 
-            ax: matplotlib.axes.Axes = None,
-            title: str = None, 
-            label_with: list[str] = None, 
-            err_layer: str = None, 
-            plt_kwargs: dict = {},
-            ) -> None:
-        """
-        Plot a set of trials given a boolean or index subset.
-        Args:
-            subset (list[bool | int]): Boolean mask or indices selecting trials.
-            ax (matplotlib.axes.Axes | None): Axis to plot on. Creates a new one if None.
-            title (str | None): Optional title for the axis.
-            label_with (list[str] | None): Obs columns used to build legend labels.
-            err_layer (str | None): Optional layer name providing per-timepoint error.
-            **kwargs: Additional keyword arguments passed to plot_line.
-        Returns:
-            None
-        """        
-        idxs = np.arange(self.n_trials)[subset]
-        if ax is None: fig, ax = plt.subplots()
-        for i in idxs:
-            self.plot_line(i, ax=ax, label_with=label_with, err_layer=err_layer, plt_kwargs=plt_kwargs)
-        if label_with is not None: plt.legend()
-        if title is not None: ax.set_title(title)
-
-    def plot_groups(
-            self, 
-            group_on: list[str], 
-            label_with: list[str] | None = None, 
-            err_layer: str | None = None, 
-            save_dir: str | None = None,
-            save_ext: str = '.png',
-            save_dpi: int = 140, 
-            plt_kwargs: dict = {},
-            ax = None,
-            ):
-        """
-        Plot trials grouped by observation columns.
-        Args:
-            group_on (list[str]): Obs columns used to define groups.
-            label_with (list[str] | None): Obs columns used to build legend labels.
-            err_layer (str | None): Optional layer name providing per-timepoint error.
-            save_dir (str | None): Optional output directory to save figures to.
-            save_ext (str): What format to save images in.
-            save_dpi (int): What dpi to save images at.
-            **kwargs: Additional keyword arguments passed to plot_set.
-        Returns:
-            None
-        """        
-        groups = self.obs.groupby(group_on).indices
-        for gkey, idxs in groups.items():
-            if not isinstance(gkey, tuple): gkey=[gkey]
-            title = ', '.join([f'{name}: {val}' for name, val in zip(group_on, gkey)])
-            self.plot_set(subset=idxs, label_with=label_with, title=title, err_layer=err_layer, plt_kwargs=plt_kwargs, ax=ax)
-            if save_dir is not None:
-                file_name = '_'.join([f'{name}-{val}' for name, val in zip(group_on, gkey)]) + save_ext
-                plt.savefig(os.path.join(save_dir, file_name), dpi=save_dpi)
-            plt.show()
-    
-    def plot_all(
-            self,
-            label_with: list[str] | None = None, 
-            err_layer: str | None = None, 
-            plt_kwargs: dict = {},
-            ax = None,
-            ):
-        idxs = np.arange(self.n_trials, dtype=int)
-        self.plot_set(subset=idxs, label_with=label_with, err_layer=err_layer, plt_kwargs=plt_kwargs, ax=ax)
-        plt.show()
-
-
     # --- convienience ---
-    def filter_rows(self, mask: np.ndarray, inplace: bool = False) -> "None | PhotometryData":
+    def get_layer(self, key: str) -> np.ndarray:
+        """Get a layer from the underlying AnnData object.
+
+        Args:
+            key (str): Layer name.
+
+        Returns:
+            np.ndarray: Requested layer data.
         """
-        Filter rows (trials) using a boolean mask.
+        return cast(np.ndarray, self.adata.layers[key])
+
+    def filter_rows(self, mask: np.ndarray, inplace: bool = False) -> "None | PhotometryData":
+        """Filter rows (trials) using a boolean mask.
+
         Args:
             mask (np.ndarray): Boolean array of length n_trials.
-            inplace (bool): If True, modify in place. If False, return a new object.
+            inplace (bool, optional): If ``True``, modify in place. If
+                ``False``, return a new object. Defaults to ``False``.
+
         Returns:
-            None | PhotometryData: New filtered object if inplace is False, else None.
-        """        
+            None | PhotometryData: New filtered object if ``inplace`` is
+                ``False``, else ``None``.
+        """
         if inplace:
             self.adata = self.adata[mask, :].copy()
         else:
             return PhotometryData(self.adata[mask, :].copy())
 
     def add_obs_columns(self, add_from: dict[str, Any], keys: list[str] | None = None) -> None:
-        """
-        Add columns to obs from a dictionary.
+        """Add columns to `obs` from a dictionary.
+
         Args:
             add_from (dict[str, Any]): Mapping from column names to values.
-            keys (list[str] | None): Keys from add_from to add. Defaults to all keys.
+            keys (list[str] | None, optional): Keys from ``add_from`` to add.
+                Defaults to all keys.
+
         Returns:
             None
-        """        
+        """
         keys = list(add_from.keys()) if keys is None else keys
         for k in keys:
             self.adata.obs[k] = add_from[k]
 
     def add_metadata(self, add_from: dict[str, Any], keys: list[str] | None = None) -> None:
-        """
-        Add entries to the .uns metadata dictionary.
+        """Add entries to the `.uns` metadata dictionary.
+
         Args:
             add_from (dict[str, Any]): Mapping from keys to metadata values.
-            keys (list[str] | None): Keys from add_from to add. Defaults to all keys.
+            keys (list[str] | None, optional): Keys from ``add_from`` to add.
+                Defaults to all keys.
+
         Returns:
             None
-        """        
+        """
         keys = list(add_from.keys()) if keys is None else keys
         for k in keys:
             self.adata.uns[k] = add_from[k]
 
     def drop_obs_columns(self, to_drop: list[str]) -> None:
-        """
-        Drop observation columns from obs.
+        """Drop observation columns from `obs`.
+
         Args:
             to_drop (list[str]): Column names to drop.
+
         Returns:
             None
-        """        
+        """
         self.adata.obs = self.obs.drop(to_drop, errors='ignore', axis=1)
 
     def get_text_value_counts(self, col: str) -> str:
-        """
-        Get a string summary of value counts for a column in obs.
+        """Get a string summary of value counts for a column in `obs`.
+
         Args:
-            col (str): Column name in obs.
+            col (str): Column name in ``obs``.
+
         Returns:
             str: Comma-separated summary of value counts.
         """
@@ -586,25 +556,25 @@ class PhotometryData:
             downsample: int | None = None,
 
             ) -> pd.DataFrame:
-        '''
-        Translate trial data to long dataframe format. Mostly for graphing.
+        """Translate trial data to long DataFrame format.
 
-        Parameters
-        ----------
-        layer : str | None, optional
-            Which layer to export, if none `self.X` used, by default None.
-        err_layer : str | None, optional
-            Which layer, if any, to add as an error col.
-        obs_cols : list[str] | None, optional
-            Which columns from `obs` to include, by default None.
-        downsample : int | None, optional
-            How much to downsample the time series data if at all, by default None.
+        Mostly useful for graphing.
 
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing columns, trial_id, obs_cols specified, time_idx, signal, time, err_layer in long format.
-        '''
+        Args:
+            layer (str | None, optional): Which layer to export. If ``None``,
+                ``self.X`` is used. Defaults to ``None``.
+            err_layer (str | None, optional): Which layer, if any, to add as
+                an error column. Defaults to ``None``.
+            obs_cols (list[str] | None, optional): Which columns from ``obs``
+                to include. Defaults to ``None``.
+            downsample (int | None, optional): How much to downsample the time
+                series data, if at all. Defaults to ``None``.
+
+        Returns:
+            pd.DataFrame: DataFrame containing ``trial_id``, selected
+                ``obs_cols``, ``time_idx``, signal values, time, and
+                ``err_layer`` in long format.
+        """
         obj = self if downsample is None else self.downsample(downsample)
         X = obj.adata.layers[layer] if layer is not None else obj.adata.X
 
@@ -637,3 +607,146 @@ class PhotometryData:
             long_signal = long_signal.join(long_err.filter([err_layer]), how='left')
 
         return long_signal
+
+    # --- plotting ---
+    def plot_line(
+            self, i: int, 
+            ax: matplotlib.axes.Axes | None = None, 
+            label_with: list[str] | None = None, 
+            err_layer: str | None = None,
+            plt_kwargs: dict = {},
+        ) -> None:
+        """Plot a single trial time series with an optional error band.
+
+        Args:
+            i (int): Trial index to plot.
+            ax (matplotlib.axes.Axes | None, optional): Axis to plot on.
+                Creates a new one if ``None``. Defaults to ``None``.
+            label_with (list[str] | None, optional): ``obs`` columns used to
+                build the legend label. Defaults to ``None``.
+            err_layer (str | None, optional): Optional layer name providing
+                per-timepoint error. Defaults to ``None``.
+            plt_kwargs (dict, optional): Additional keyword arguments passed to
+                ``plt.plot``. Defaults to ``{}``.
+
+        Returns:
+            None
+        """
+        if ax is None: fig, ax = plt.subplots()
+        
+        x = self.var['t'].to_numpy()
+        y = self.X[i, :]
+        row = self.obs.iloc[i]
+
+        if label_with is not None:
+            vals = row[label_with].astype(str).to_list()
+            name_val_pairs = [k + ': ' + v for k, v in zip(label_with, vals)]
+            label = ', '.join(name_val_pairs)
+        else:
+            label = None
+
+        ax.plot(x, y, label=label, **plt_kwargs)
+        if err_layer is not None:
+            yerr = self.adata.layers[err_layer][i]
+            ax.fill_between(x, y + yerr, y - yerr, alpha=0.3)
+
+    def plot_set(
+            self, 
+            subset: list[bool | int], 
+            ax: matplotlib.axes.Axes = None,
+            title: str = None, 
+            label_with: list[str] = None, 
+            err_layer: str = None, 
+            plt_kwargs: dict = {},
+            ) -> None:
+        """Plot a set of trials given a boolean or index subset.
+
+        Args:
+            subset (list[bool | int]): Boolean mask or indices selecting trials.
+            ax (matplotlib.axes.Axes, optional): Axis to plot on. Creates a
+                new one if ``None``. Defaults to ``None``.
+            title (str, optional): Optional title for the axis. Defaults to
+                ``None``.
+            label_with (list[str], optional): ``obs`` columns used to build
+                legend labels. Defaults to ``None``.
+            err_layer (str, optional): Optional layer name providing
+                per-timepoint error. Defaults to ``None``.
+            plt_kwargs (dict, optional): Additional keyword arguments passed to
+                `plot_line`. Defaults to ``{}``.
+
+        Returns:
+            None
+        """
+        idxs = np.arange(self.n_trials)[subset]
+        if ax is None: fig, ax = plt.subplots()
+        for i in idxs:
+            self.plot_line(i, ax=ax, label_with=label_with, err_layer=err_layer, plt_kwargs=plt_kwargs)
+        if label_with is not None: plt.legend()
+        if title is not None: ax.set_title(title)
+
+    def plot_groups(
+            self, 
+            group_on: list[str], 
+            label_with: list[str] | None = None, 
+            err_layer: str | None = None, 
+            save_dir: str | None = None,
+            save_ext: str = '.png',
+            save_dpi: int = 140, 
+            plt_kwargs: dict = {},
+            ax = None,
+            ):
+        """Plot trials grouped by observation columns.
+
+        Args:
+            group_on (list[str]): Obs columns used to define groups.
+            label_with (list[str] | None, optional): ``obs`` columns used to
+                build legend labels. Defaults to ``None``.
+            err_layer (str | None, optional): Optional layer name providing
+                per-timepoint error. Defaults to ``None``.
+            save_dir (str | None, optional): Optional output directory to save
+                figures to. Defaults to ``None``.
+            save_ext (str, optional): File extension used when saving images.
+                Defaults to ``'.png'``.
+            save_dpi (int, optional): DPI used when saving images. Defaults to
+                ``140``.
+            plt_kwargs (dict, optional): Additional keyword arguments passed to
+                `plot_set`. Defaults to ``{}``.
+            ax (optional): Axis to plot on. Defaults to ``None``.
+
+        Returns:
+            None
+        """
+        groups = self.obs.groupby(group_on).indices
+        for gkey, idxs in groups.items():
+            if not isinstance(gkey, tuple): gkey=[gkey]
+            title = ', '.join([f'{name}: {val}' for name, val in zip(group_on, gkey)])
+            self.plot_set(subset=idxs, label_with=label_with, title=title, err_layer=err_layer, plt_kwargs=plt_kwargs, ax=ax)
+            if save_dir is not None:
+                file_name = '_'.join([f'{name}-{val}' for name, val in zip(group_on, gkey)]) + save_ext
+                plt.savefig(os.path.join(save_dir, file_name), dpi=save_dpi)
+            plt.show()
+    
+    def plot_all(
+            self,
+            label_with: list[str] | None = None, 
+            err_layer: str | None = None, 
+            plt_kwargs: dict = {},
+            ax = None,
+            ):
+        """Plot all trials.
+
+        Args:
+            label_with (list[str] | None, optional): ``obs`` columns used to
+                build legend labels. Defaults to ``None``.
+            err_layer (str | None, optional): Optional layer name providing
+                per-timepoint error. Defaults to ``None``.
+            plt_kwargs (dict, optional): Additional keyword arguments passed to
+                `plot_set`. Defaults to ``{}``.
+            ax (optional): Axis to plot on. Defaults to ``None``.
+
+        Returns:
+            None
+        """
+        idxs = np.arange(self.n_trials, dtype=int)
+        self.plot_set(subset=idxs, label_with=label_with, err_layer=err_layer, plt_kwargs=plt_kwargs, ax=ax)
+        plt.show()

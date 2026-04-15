@@ -4,20 +4,27 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import json
 import tdt
 
 from .PhotometryExperiment import PhotometryExperiment
 from ..utils.ops import downsample_1d
 
 class PhotometryLoader(ABC):
+    """Abstract base class for photometry data loaders."""
+
     @abstractmethod
     def load(self) -> PhotometryExperiment:
+        """Load data and return a `PhotometryExperiment` instance.
+
+        Returns:
+            PhotometryExperiment: Loaded experiment object.
+        """
         pass
 
 class TDTLoader(PhotometryLoader):
-    '''
-    Extracts photometry data from TDT folder format.
-    '''
+    """Extract photometry data from TDT folder format."""
+
     def __init__(
             self,
             data_folder: str,
@@ -27,14 +34,19 @@ class TDTLoader(PhotometryLoader):
             isosbestic_label: str,
             downsample: int = 10,
             ):
-        """
+        """Initialize a TDT photometry loader.
+
         Args:
             data_folder (str): Path to the TDT block folder.
             box (str): TDT box identifier used in stream and epoc labels.
             event_labels (list[str]): Event labels to extract from epocs.
             signal_label (str): Base label for the signal channel.
             isosbestic_label (str): Base label for the isosbestic channel.
-            downsample (int): downsampling factor for the raw streams (mean pooling).
+            downsample (int, optional): Downsampling factor for the raw
+                streams (mean pooling). Defaults to ``10``.
+
+        Returns:
+            None
         """
         self.data_folder = data_folder
         self.box = box
@@ -47,6 +59,11 @@ class TDTLoader(PhotometryLoader):
 
     # --- loader method ---
     def load(self) -> PhotometryExperiment:
+        """Load TDT data and return a `PhotometryExperiment` instance.
+
+        Returns:
+            PhotometryExperiment: Loaded experiment object.
+        """
         data = self.extract_data()
         obj = PhotometryExperiment(**data)
         return obj 
@@ -54,10 +71,15 @@ class TDTLoader(PhotometryLoader):
 
     # --- data extraction ---
     def extract_data(self) -> dict[str, Any]:
-        """
-        Load data from TDT, extract streams and events, and downsample signals.
+        """Load data from TDT and extract streams and events.
+
+        Downsamples the signal and isosbestic streams before packaging them
+        into the experiment input dictionary.
+
         Returns:
-            PhotometryExperiment
+            dict[str, Any]: Dictionary containing the raw signal,
+                isosbestic signal, time vector, frequency, events, and
+                metadata needed to construct a `PhotometryExperiment`.
         """
         tdt_obj = tdt.read_block(self.data_folder)
 
@@ -88,12 +110,13 @@ class TDTLoader(PhotometryLoader):
 
     # --- event extraction ---
     def extract_events(self, tdt_obj) -> dict:
-        """
-        Used by `self.extract_data` to get event timestamps from tdt_obj.
+        """Extract event timestamps from a TDT block object.
+
         Args:
-            tdt_obj (tdt): Object from `tdt.read_block()`.
+            tdt_obj: Object returned by `tdt.read_block()`.
+
         Returns:
-            dict
+            dict: Mapping of event labels to timestamp arrays.
         """
         # extract event timestamps for requested labels
         events = {}
@@ -109,10 +132,93 @@ class TDTLoader(PhotometryLoader):
         return events
     
 class CSVLoader(PhotometryLoader):
+    """Extract photometry data from CSV-based inputs."""
+
     def __init__(
             self,
-            signal_csv: str,
-            isosbestic_signal_file: str | None = None,
-            events: str | None = None,
-        ) -> None:
-        pass
+            csv: str,
+            time_col: str = 'time',
+            signal_col: str = 'signal',
+            isosbestic_col: str | None = 'isosbestic',
+            events_json: str | None = None,
+            downsample: int = 10,
+            ) -> None:
+        """Initialize a CSV photometry loader.
+
+        Args:
+            csv (str): Path to the CSV file containing photometry data.
+            time_col (str, optional): Column name containing time values.
+                Defaults to ``'time'``.
+            signal_col (str, optional): Column name containing the signal
+                values. Defaults to ``'signal'``.
+            isosbestic_col (str | None, optional): Column name containing the
+                isosbestic values. Defaults to ``'isosbestic'``.
+            events_json (str | None, optional): Path to a JSON file mapping
+                event labels to timestamps. Defaults to ``None``.
+            downsample (int, optional): Downsampling factor applied to the CSV
+                series. Defaults to ``10``.
+
+        Returns:
+            None
+        """
+        # save fpaths and params
+        self.csv = csv
+        self.time_col = time_col,
+        self.sig_col = signal_col,
+        self.iso_col = isosbestic_col,
+        
+        self.events_json = events_json
+        self.downsample = downsample
+
+        self.metadata = {}
+
+    def extract_data(self) -> dict[str, Any]:
+        """Load signal, time, and event data from CSV and JSON files.
+
+        Returns:
+            dict[str, Any]: Dictionary containing the raw signal,
+                isosbestic signal, time vector, frequency, events, and
+                metadata needed to construct a `PhotometryExperiment`.
+        """
+        # load events
+        with open(self.events_json, 'r') as f:
+            events: dict = json.load(f)
+        events = {str(event) : np.asarray(timestamps) for event, timestamps in events.items()}
+        
+        # load csv
+        df = pd.read_csv(self.csv)
+
+        if self.sig_col in df:
+            raw_signal = downsample_1d(df[self.sig_col].to_numpy(), self.downsample)
+        else:
+            raise ValueError(f"Column for signal timepoints ({self.sig_col}) is not in {self.csv}")
+        
+        if self.iso_col in df: 
+            raw_isosbestic = downsample_1d(df[self.iso_col].to_numpy(), self.downsample)
+        else: 
+            raw_isosbestic = None
+
+        if self.time_col in df: 
+            time = downsample_1d(df[self.iso_col].to_numpy(), self.downsample)
+        else: 
+            time = None
+        
+        # package results
+        data = dict(
+            raw_signal = raw_signal,
+            raw_isosbestic = raw_isosbestic,
+            time = time,
+            frequency = None,
+            events = events,
+            metadata = self.metadata,
+        )
+        return data
+    
+    def load(self) -> PhotometryExperiment:
+        """Load CSV-based data and return a `PhotometryExperiment` instance.
+
+        Returns:
+            PhotometryExperiment: Loaded experiment object.
+        """
+        data = self.extract_data()
+        return PhotometryExperiment(**data)

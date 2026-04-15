@@ -18,27 +18,41 @@ from ..utils.ops import (
 from ..utils.stats import OLS_fit, IRLS_fit, fit_photobleaching
 
 class PhotometryExperiment:
+    """Handle processing of raw photometry data."""
+
     id: str
     metadata: dict[str, Any]
     events: dict[str, np.ndarray]
     raw_signal: np.ndarray
-    raw_isosbestic: np.ndarray
+    raw_isosbestic: np.ndarray | None
     frequency: float
     time: np.ndarray
     trial_data: PhotometryData
 
-    """
-    Handles processing of raw photometry data.
-    """
     def __init__( 
             self,
             raw_signal: np.ndarray,
-            raw_isosbestic: np.ndarray,
+            raw_isosbestic: np.ndarray | None,
             time: np.ndarray,
             frequency: float | None = None,
             events: dict = {},
             metadata: dict = {},
             ):
+        """Initialize a photometry experiment.
+
+        Args:
+            raw_signal (np.ndarray): Raw signal channel values.
+            raw_isosbestic (np.ndarray): Raw isosbestic channel values. If
+                ``None``, experiment is assumed to be single channel.
+            time (np.ndarray): Time points corresponding to the raw signals.
+            frequency (float | None, optional): Sampling frequency in Hz. If
+                ``None`` (default), it is estimated from ``raw_signal`` and
+                ``time``.
+            events (dict, optional): Mapping of event labels to timestamp
+                arrays. Defaults to ``{}``.
+            metadata (dict, optional): Additional experiment metadata. Defaults
+                to ``{}``.
+        """
         self.raw_signal = raw_signal
         self.raw_isosbestic = raw_isosbestic
         self.time = time
@@ -60,15 +74,19 @@ class PhotometryExperiment:
             isosbestic_label: str,
             downsample: int = 10,
             ) -> PhotometryExperiment:
-        """
-        Load photometry data from TDT format.
+        """Load photometry data from TDT format.
+
         Args:
             data_folder (str): Path to the TDT block folder.
             box (str): TDT box identifier used in stream and epoc labels.
             event_labels (list[str]): Event labels to extract from epocs.
             signal_label (str): Base label for the signal channel.
             isosbestic_label (str): Base label for the isosbestic channel.
-            downsample (int): downsampling factor for the raw streams (mean pooling).
+            downsample (int, optional): Downsampling factor for the raw streams
+                (mean pooling). Defaults to ``10``.
+
+        Returns:
+            PhotometryExperiment: Loaded experiment instance.
         """
         from .PhotometryLoader import TDTLoader
         loader = TDTLoader(
@@ -83,10 +101,10 @@ class PhotometryExperiment:
                 
     # --- pipeline API ---
     def run_pipeline(self) -> None:
-        """
-        Run the full processing pipeline for 1 experiment (to be implemented in child classes).
-        Args:
-            None
+        """Run the full processing pipeline for one experiment.
+
+        This method is intended to be implemented by child classes.
+
         Returns:
             None
         """
@@ -103,18 +121,37 @@ class PhotometryExperiment:
             c: float | None = 3,
             detrend_bleaching: bool = False,
             ) -> None:
-        """
-        Low-pass filter and preprocess the signal using isosbestic fitting.
+        """Low-pass filter and preprocess the signal using isosbestic fitting.
+
         Args:
-            cutoff_frequency (float): Low-pass cutoff frequency in Hz.
-            order (int): Butterworth filter order.
-            iso_correction_method Literal['dF/F', 'dF', 'none']: Isosbestic correction method, 'dF/F' or 'dF'.
-            signal_normalization (Literal['zscore', 'nullZ', 'none']): Method for whole signal normalization, 'none' recommended.
-            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept']): model used to fit isosbestic.
-            maxiter (int): maximum iterations of IRLS isosbestic fit.
-            c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
-                1.4 <= c <= 3 is recommended unless there is large global drift is experimental signal, in which case c >= 10 is better. 
-            detrend_bleaching (bool): whether or not to detrend signals for photobleaching using a (sig - bleach) / bleach scheme.
+            cutoff_frequency (float, optional): Low-pass cutoff frequency in Hz.
+                Values between 1 and 5 recommended. Defaults to ``3.0``.
+            order (int, optional): Butterworth filter order. 
+                Values >3 are recommended. Defaults to ``4``.
+            iso_correction_method (Literal['dF/F', 'dF', 'none'], optional):
+                Isosbestic correction method, ``'dF/F'`` ((signal - fitted isobestic) / fitted isosbestic)
+                or ``'dF'`` (signal - fitted isobestic). Defaults to ``'dF/F'``.
+            signal_normalization (Literal['zscore', 'nullZ', 'none'], optional): 
+                Method for whole-signal normalization; ``'none'``
+                for dF/F and ``'zscore'`` for dF is recommended. 
+                Defaults to ``'none'``.
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept',
+                'OLS_no_intercept'], optional): Model used to fit isosbestic to experimental signal.
+                IRLS methods recommended. Use a no intercept type model if large global
+                change is present in the experimental signal.
+                Defaults to ``'IRLS'``.
+            maxiter (int, optional): Maximum iterations of the IRLS isosbestic
+                fit. Defaults to ``1000``.
+            c (float | None, optional): Constant for IRLS fits; smaller values
+                mean more agressive downweighting. ``1.4 <= c <= 3`` is
+                recommended unless there is large global drift in the
+                experimental signal, in which case large values (>5) are better.
+                Defaults to ``3``.
+            detrend_bleaching (bool, optional): Whether to detrend signals for
+                photobleaching using a (signal - fitted bleach) / fitted bleach scheme.
+                Only recommended if using no or ``'dF'`` isosbestic correction.
+                Defaults to ``False``.
+
         Returns:
             None
         """
@@ -200,21 +237,37 @@ class PhotometryExperiment:
             time_error_threshold: float = 0.1,
             event_conflict_logic: Literal['first', 'last', 'mean'] = 'first',
             ) -> None:
-        """
-        Build trial-wise windows, normalize, and store trial data.
+        """Build trial-wise windows, normalize, and store trial data.
+
         Args:
             align_to (str): Event label used to align and identify trial, should be one per trial.
             center_on (list[str]): Event labels to center trial windows on.
-            trial_bounds (list[float, float]): Trial window bounds relative to ``center_on`` events.
-            baseline_bounds (list[float, float]): Baseline window bounds relative to ``align_to`` event.
-            event_tolerences (dict[str, tuple[float, float]]): Time tolerances for event annotation, relative to ``align_to``.
-            trial_normalization (Literal['zscore', 'zero', 'none']): Normalization method for trial signals based on baselines.
-            check_overlap (bool): Whether to throw an error multiple ``center_on`` events are found in the same trial.
-            time_error_threshold (float): Maximum allowed mean timing error.
-            event_conflict_logic (Literal['first', 'last', 'mean']): Logic for choosing center on event timestamps if multiple of the same event are present.
+                Events should be mutually exclusive (i.e. lever press choice).
+                If no ``center_on`` events are present within an identified
+                trial, ``align_to`` will be centered on.
+            trial_bounds (tuple[float, float]): Trial window bounds relative to
+                ``center_on`` events.
+            baseline_bounds (tuple[float, float] | None, optional): Baseline
+                window bounds relative to ``align_to`` event used for per-trial
+                normalizations. Defaults to ``None``.
+            event_tolerences (dict[str, tuple[float, float]], optional): Time
+                tolerances for event annotation, relative to ``align_to``.
+                Defaults to ``{}``.
+            trial_normalization (Literal['zscore', 'zero', 'mad', 'amp',
+                'none'], optional): Normalization method for trial signals
+                based on baselines. Defaults to ``'none'``.
+            check_overlap (bool, optional): Whether to throw an error when
+                multiple ``center_on`` events are found in the same trial.
+                Defaults to ``True``.
+            time_error_threshold (float, optional): Maximum allowed mean timing
+                error. Defaults to ``0.1``.
+            event_conflict_logic (Literal['first', 'last', 'mean'], optional):
+                Logic for choosing center-on event timestamps if multiple of the
+                same event are present. Defaults to ``'first'``.
+
         Returns:
             None
-        """        
+        """
         # validate inputs
         if align_to not in self.events: 
             raise KeyError(f"align_to '{align_to}' not found in events: {list(self.events)}")
@@ -325,17 +378,20 @@ class PhotometryExperiment:
             order: int = 4,
             axis: int = 0,
         ) -> np.ndarray:
-        """
-        Apply a low-pass Butterworth filter to a 1D signal. Usually already done by photometry machine at 20 or 30 Hz.
+        """Apply a low-pass Butterworth filter to a signal.
+
         Args:
             signal (np.ndarray): Input signal array.
             sample_frequency (float): Sampling frequency in Hz.
-            cutoff_frequency (float): Low-pass cutoff frequency in Hz.
-            order (int): Butterworth filter order.
-            axis (int): axis of array to perform a lowpass on.
+            cutoff_frequency (float, optional): Low-pass cutoff frequency in Hz.
+                Defaults to ``30.0``.
+            order (int, optional): Butterworth filter order. Defaults to ``4``.
+            axis (int, optional): Axis of the array to perform a low-pass on.
+                Defaults to ``0``.
+
         Returns:
             np.ndarray: Filtered signal.
-        """        
+        """
         normalized_frequency = cutoff_frequency / (sample_frequency / 2)
         sos = butter(order, normalized_frequency, btype='low', output='sos') 
         return sosfiltfilt(sos, signal, axis=axis, padtype='odd', padlen=None)
@@ -344,21 +400,27 @@ class PhotometryExperiment:
             self, 
             signal: np.ndarray, 
             isosbestic: np.ndarray, 
-            maxiter: int = 1000,
             fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
+            maxiter: int = 1000,
             c: float | None = None,
             ) -> tuple[np.ndarray, float, Any]:
-        """
-        Fit the isosbestic channel to the signal using IRLS.
+        """Fit the isosbestic channel to the signal.
+
         Args:
             signal (np.ndarray): Filtered signal trace.
             isosbestic (np.ndarray): Filtered isosbestic trace.
-            maxiter (int): maximum iterations of isosbestic fit.
-            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept']): model used to fit isosbestic.
-            c (float): constant for IRLS fits, smaller values mean more agressive downweighting.
-                1.4 <= c <= 3 is recommended. 
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept',
+                'OLS_no_intercept'], optional): Model used to fit isosbestic.
+                Defaults to ``'IRLS'``.
+            maxiter (int, optional): Maximum iterations of IRLS isosbestic fit.
+                Defaults to ``1000``.
+            c (float | None, optional): Constant for IRLS fits; smaller values
+                mean more agressive downweighting. ``1.4 <= c <= 3`` is
+                recommended. Defaults to ``None``.
+
         Returns:
-            tuple[np.ndarray, float, np.ndarry]: Fitted isosbestic, R² value, and fit coefficients.
+            tuple[np.ndarray, float, Any]: Fitted isosbestic, R-squared value,
+                and fit coefficients.
         """
         # fit using specified model
         match fit_using:
@@ -384,14 +446,20 @@ class PhotometryExperiment:
             signal: np.ndarray,
             window_dur: float = 5,
             ) -> np.ndarray:
-        '''
-        Detrend photobleaching from a signal using a (signal - bleach) / bleach scheme.
+        """Detrend photobleaching from a signal.
+        
+        Uses a ``(signal - bleach) / bleach`` scheme. See ``fit_photobleaching_curve()``
+        for details of fit method.
+
         Args:
-            signal (np.ndarray): 1D array of signal.
-            window_dur (float): length of window in seconds used for sliding window median downsampling.
+            signal (np.ndarray): One-dimensional signal array.
+            window_dur (float, optional): Length of the window in seconds used
+                for sliding-window median downsampling. Defaults to ``5``.
+
         Returns:
-            detrended_signal (np.ndarray): (signal - bleach) / bleach.
-        '''
+            np.ndarray: Detrended signal computed as
+                ``(signal - bleach) / bleach``.
+        """
         fitted_curve, fitted_params = self.fit_photobleaching_curve(signal=signal, window_dur=window_dur)
         return (signal - fitted_curve) / fitted_curve
     
@@ -400,17 +468,23 @@ class PhotometryExperiment:
             signal: np.ndarray, 
             window_dur: float =  5,
             ) -> tuple[np.ndarray, list[float]]:
-        """
-        Fit a negative bi-exponential to photobleaching trend in raw signal and isosbestic
-        using a sliding window median downsampling scheme.
+        """Fit a curve with a negative bi-exponential photobleaching model.
+        Uses a soft_l1 least squares to fit to the sliding-window median 
+        downsampled signal.
+
         Args:
-            signal (np.ndarray): array of signal to fit photobleaching curve to.
-            window (float): length of window in seconds used for sliding window median downsampling.
+            signal (np.ndarray): Signal array to fit the photobleaching curve to.
+            window_dur (float, optional): Length of the window in seconds used
+                for sliding-window median downsampling. Defaults to ``5``.
+
         Returns:
-            tuple[np.ndarray, pd.DataFrame]: array of fitted curve and DataFrame of parameters and metrics.
+            tuple[np.ndarray, list[float]]: Fitted curve and fitted parameter
+            values.
         """
         window_len = int(window_dur * self.frequency)
         fitted_curve, params = fit_photobleaching(signal, self.time, window=window_len)
+
+        # TODO: delete or implement?
         r2_val = r2_score(signal, fitted_curve)
         mse_val = mean_squared_error(signal, fitted_curve)
         
@@ -418,15 +492,16 @@ class PhotometryExperiment:
     
     # --- extraction of trial-wise data ---
     def find_interval_bounds(self, series: np.ndarray, centers: np.ndarray, bounds: tuple[int, int]) -> np.ndarray:
-        """
-        Compute index bounds for windows around specified centers.
+        """Compute index bounds for windows around specified centers.
+
         Args:
             series (np.ndarray): Monotonic time-like series.
             centers (np.ndarray): Center times for each interval.
             bounds (tuple[int, int]): Relative lower and upper bounds in the same units as series.
+
         Returns:
             np.ndarray: Array of shape (n_intervals, 2) with left and right indices.
-        """        
+        """
         low, high = bounds
         left_idxs = np.searchsorted(series, centers + low, side='left')
         right_idxs = np.searchsorted(series, centers + high, side='right')
@@ -438,15 +513,18 @@ class PhotometryExperiment:
             time_intervals: np.ndarray, 
             logic: Literal['first', 'last', 'mean'] = 'first',
             ) -> np.ndarray:
-        """
-        Find timestamps that falls within each time interval and select with customizable logic.
+        """Find timestamps within each time interval using customizable logic.
+
         Args:
             timestamps (np.ndarray): Sorted 1D array of event timestamps.
             time_intervals (np.ndarray): Array of shape (n_trials, 2) with [start, end] bounds.
-            logic (Literal['first', 'last', 'mean'] | int): Logic for choosing event timestamps if multiple are present.
+            logic (Literal['first', 'last', 'mean'], optional): Logic for
+                choosing event timestamps if multiple are present. Defaults to
+                ``'first'``.
+
         Returns:
             np.ndarray: Array of first timestamps per interval or NaN if none exist.
-        """        
+        """
         # tests which events are in interval
         timestamps = np.sort(timestamps)
         lo_idx = np.searchsorted(timestamps, time_intervals[:, 0], side="left")
@@ -481,18 +559,21 @@ class PhotometryExperiment:
             tolorences: dict[str, np.ndarray],
             logic: Literal['first', 'last', 'mean'] = 'first',
             ) -> dict[str, np.ndarray]:
-        """
-        Annotate intervals around centers with event timestamps within tolerances.
+        """Annotate intervals around centers with event timestamps.
+
         Args:
             align_to (str): Label of the primary alignment event.
             series (np.ndarray): Monotonic time-like series.
             centers (np.ndarray): Center times for each trial.
             events (dict[str, np.ndarray]): Mapping of event labels to timestamps.
             tolorences (dict[str, np.ndarray]): Mapping of labels to time tolerances.
-            logic (Literal['first', 'last', 'mean'] | int): Logic for choosing event timestamps if multiple are present.
+            logic (Literal['first', 'last', 'mean'], optional): Logic for
+                choosing event timestamps if multiple are present. Defaults to
+                ``'first'``.
+
         Returns:
             dict[str, np.ndarray]: Mapping from labels to aligned event times per trial.
-        """        
+        """
         out = {}
         out[align_to] = centers
         for label, bounds in tolorences.items():
@@ -502,18 +583,26 @@ class PhotometryExperiment:
             out[label] = self.find_timestamp_in_intervals(timestamps=timestamps, time_intervals=time_intervals, logic=logic)
         return out
 
-    def create_windows(self, signal: np.ndarray, time: np.ndarray, events: dict[str, np.ndarray], centers: np.ndarray, bounds: tuple[int, int]) -> tuple[np.ndarray, np.ndarray, dict]:
-        """
-        Slice signal and time into fixed-length windows around centers.
+    def create_windows(
+            self, 
+            signal: np.ndarray, 
+            time: np.ndarray, 
+            events: dict[str, np.ndarray], 
+            centers: np.ndarray, 
+            bounds: tuple[int, int]
+            ) -> tuple[np.ndarray, np.ndarray, dict]:
+        """Slice signal and time into fixed-length windows around centers.
+
         Args:
             signal (np.ndarray): Full preprocessed signal trace.
             time (np.ndarray): Associated time vector.
             events (dict[str, np.ndarray]): Per-label event times for each trial.
             centers (np.ndarray): Window center times for each trial.
             bounds (tuple[int, int]): Relative bounds [low, high] around centers.
+
         Returns:
             tuple[np.ndarray, np.ndarray, dict]: Signal windows, centered time windows, and centered events.
-        """        
+        """
         # find target window bounds
         low, high = bounds
         left_idxs = np.searchsorted(time, centers + low, side='left')
@@ -528,17 +617,28 @@ class PhotometryExperiment:
         events_centered = {k : v - centers for k, v in events.items()}
         return signal_windows, time_windows, events_centered
 
-    def find_window_centers(self, center_on: str | list[str], align_on: str, events: dict[str, np.ndarray], check_overlap: bool = True) -> np.ndarray:
-        """
-        Determine window centers based on center_on events or fallback to align_on.
+    def find_window_centers(
+            self, 
+            center_on: str | list[str], 
+            align_on: str, 
+            events: dict[str, np.ndarray], 
+            check_overlap: bool = True
+            ) -> np.ndarray:
+        """Determine window centers based on ``center_on`` events.
+
+        Falls back to ``align_on`` when ``center_on`` is missing.
+
         Args:
             center_on (str | list[str]): Event labels used as preferred centers.
             align_on (str): Fallback event label used when center_on is missing.
             events (dict[str, np.ndarray]): Mapping from labels to event times per trial.
-            check_overlap (bool): Whether to throw an error multiple ``center_on`` events are found in the same trial.
+            check_overlap (bool, optional): Whether to throw an error when
+                multiple ``center_on`` events are found in the same trial.
+                Defaults to ``True``.
+
         Returns:
             np.ndarray: Center times per trial.
-        """        
+        """
         # center_on events should be non-overlaping
         # if no center_on events present, center on align_on
         if isinstance(center_on, str):
@@ -559,7 +659,25 @@ class PhotometryExperiment:
         return centers
     
     # --- poor signal checks ---
-    def median_centered_abs_max_check(self, trial_signal: np.ndarray, threshold: float = 0.075):
+    def median_centered_abs_max_check(
+            self, 
+            trial_signal: np.ndarray, 
+            threshold: float = 0.075
+            ):
+        """Check whether a trial signal should be flagged as poor quality
+
+        Tests a threshold for minimum MAD (robust Z-score).
+        Threshold needs to be tuned for specific experiments.
+        Generally not recommended.
+
+        Args:
+            trial_signal (np.ndarray): Trial-by-time signal array.
+            threshold (float, optional): Mean absolute-max threshold applied
+                after median centering. Defaults to ``0.075``.
+
+        Returns:
+            bool: ``True`` if the signal is classified as poor quality.
+        """
         median_centered = trial_signal - np.median(trial_signal, axis=1, keepdims=True)
         abs_max = np.abs(median_centered).max(axis=1)
         is_poor_signal = np.mean(abs_max) < threshold
@@ -567,12 +685,17 @@ class PhotometryExperiment:
 
     # --- graphing ---
     def dashboard(self, save: str | None = None) -> None:
-        """
-        Quickly plot the raw, fitted, and processed signal, isosbestic, and fitted photobleaching curve (if avaliable).
+        """Plot a quick dashboard for the experiment.
+
+        Plots the raw, fitted, and processed signal, isosbestic trace, and the
+        fitted photobleaching curve when available.
+
         Args:
-            save (str, None): Path to save figure, if None figure does not save.
+            save (str | None, optional): Path to save the figure. If ``None``,
+                the figure is not saved. Defaults to ``None``.
+
         Returns:
-            None.
+            None
         """
         fig, (ax1, ax2) = plt.subplots(
             ncols=1, nrows=2, 

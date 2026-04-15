@@ -1,6 +1,6 @@
 from scipy.stats import ttest_ind, false_discovery_control, PermutationMethod
 from scipy.stats import t as t_dist, ttest_ind
-from typing import Literal, Tuple, List, Dict, Any
+from typing import Literal, Any, Callable
 
 import numpy as np
 
@@ -10,7 +10,7 @@ try:
 except ImportError:
     _HAS_JOBLIB = False
 
-def t_test(X: np.ndarray, Y: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
+def t_test(X: np.ndarray, Y: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
     res = ttest_ind(X, Y, axis=0, equal_var=False, nan_policy="omit")
     stat = res.statistic
     pval = res.pvalue
@@ -18,7 +18,7 @@ def t_test(X: np.ndarray, Y: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]
     return stat, pval, df_mean
 
 def t_thresh(p_threshold, df) -> float:
-    t_thres = t_dist.isf(p_threshold / 2.0, df=df)
+    t_thres: float = t_dist.isf(p_threshold / 2.0, df=df)
     return t_thres
 
 def pointwise_ttest(
@@ -27,21 +27,24 @@ def pointwise_ttest(
         permutations: int | None = None,
         multiple_test_correction: Literal['bh', 'by'] | None = None,
         random_state: int = 42,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     if permutations is not None:
         method = PermutationMethod(n_resamples=permutations, random_state=random_state)
-        t_stat, pval = ttest_ind(X, Y, axis=0, equal_var=False, method=method)
+        res = ttest_ind(X, Y, axis=0, equal_var=False, method=method)
         df = None
     else:
         res = ttest_ind(X, Y, axis=0, equal_var=False)
-        t_stat = res.statistic
-        pval = res.pvalue
         df = res.df
+
+    t_stat = res.statistic
+    pval = res.pvalue
+
     if multiple_test_correction is not None:
         pval = false_discovery_control(pval, method=multiple_test_correction)
+
     return t_stat, pval, df
 
-def _find_clusters(mask: np.ndarray) -> List[np.ndarray]:
+def _find_clusters(mask: np.ndarray) -> list[np.ndarray]:
     mask = np.asarray(mask, dtype=bool)
     idx = np.flatnonzero(mask)
     if idx.size == 0:
@@ -49,7 +52,7 @@ def _find_clusters(mask: np.ndarray) -> List[np.ndarray]:
     breaks = np.where(np.diff(idx) > 1)[0] + 1
     return np.split(idx, breaks)
 
-def _calc_clusters_masses(obs: np.ndarray, thresh: np.ndarray) -> Tuple[List[np.ndarray], np.ndarray]:    
+def _calc_clusters_masses(obs: np.ndarray, thresh: np.ndarray) -> tuple[list[np.ndarray], np.ndarray]:    
     clusters = _find_clusters(obs > thresh) + _find_clusters(obs < -thresh)
     masses = np.abs(np.asarray([obs[idx].sum() for idx in clusters], float))
     return clusters, masses
@@ -57,13 +60,13 @@ def _calc_clusters_masses(obs: np.ndarray, thresh: np.ndarray) -> Tuple[List[np.
 def cluster_permutation_test(
     X: np.ndarray,
     Y: np.ndarray,
-    stat_func: callable = t_test,
-    thres_func: callable = t_thresh,
+    stat_func: Callable = t_test,
+    thres_func: Callable = t_thresh,
     n_perm: int = 2000,
     p_threshold: int = 0.05,
     n_jobs: int = 1,
     random_state: int | None = 42,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
     # validate inputs
     X = np.asarray(X, float)
     Y = np.asarray(Y, float)
@@ -103,7 +106,7 @@ def cluster_permutation_test(
         null_max_masses = np.array([_perm_worker(b) for b in range(n_perm)], float)
     else:
         null_max_masses = np.array(
-            Parallel(n_jobs=n_jobs)(delayed(_perm_worker)(b) for b in range(n_perm)),
+            Parallel(n_jobs=n_jobs)(delayed(_perm_worker)(b) for b in range(n_perm)), # type: ignore
             dtype=float,
         )
 
@@ -128,7 +131,7 @@ def cluster_permutation_test(
     }
     return result
 
-def _calc_cluster_depth_stats(stats: np.ndarray, thresh: float) -> Tuple[List[np.ndarray], np.ndarray]:
+def _calc_cluster_depth_stats(stats: np.ndarray, thresh: float) -> tuple[list[np.ndarray], np.ndarray]:
     clusters = _find_clusters(stats > thresh) + _find_clusters(stats < -thresh)
     depth_stats = np.zeros(shape=(len(clusters), len(stats)))
     for i, idxs in enumerate(clusters):
@@ -173,13 +176,13 @@ def _troendle_step_down(obs: np.ndarray, null: np.ndarray) -> np.ndarray:
 def cluster_depth_test(
         X: np.ndarray,
         Y: np.ndarray,
-        stat_func: callable = t_test,
-        thres_func: callable = t_thresh,
+        stat_func: Callable = t_test,
+        thres_func: Callable = t_thresh,
         n_perm: int = 2000,
         p_threshold: int = 0.05,
         n_jobs: int = 1,
         random_state: int | None = 42,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
     # validate inputs
     X = np.asarray(X, float)
     Y = np.asarray(Y, float)
@@ -219,7 +222,7 @@ def cluster_depth_test(
         null_head = np.array([_perm_worker(b) for b in range(n_perm)], float)
     else:
         null_head = np.array(
-            Parallel(n_jobs=n_jobs)(delayed(_perm_worker)(b) for b in range(n_perm)),
+            Parallel(n_jobs=n_jobs)(delayed(_perm_worker)(b) for b in range(n_perm)), # type: ignore
             dtype=float,
         )
     null_tail = _head_to_tail_stats(null_head)

@@ -3,4 +3,7 @@ pyFiberPhotometry.egg-info/
 *.pyc
 .DS_Store
 **.vscode/
+.vscode/
 pyrightconfig.json
+sandbox.ipynb
+test-results

@@ -24,6 +24,7 @@ dependencies = [
   "statsmodels",
   "scikit-learn",
   "tdt",
+  "pytest",
 ]
 
 [project.urls]
