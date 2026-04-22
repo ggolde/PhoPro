@@ -1,7 +1,10 @@
+from typing import Callable, Literal
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+
 import numpy as np
 import pandas as pd
 
-from typing import Callable
 from scipy.stats import spearmanr
 from scipy.interpolate import PchipInterpolator
 
@@ -41,250 +44,363 @@ def intervals_to_bool_mask(arr: np.ndarray, intervals: np.ndarray) -> np.ndarray
     arr_idx = np.arange(arr.size)
     return np.isin(arr_idx, idxs)
 
-# --- artifact detection ---
-def detect_artifacts_two_channel_ODS(
-        signal: np.ndarray,
-        isosbestic: np.ndarray,
-        time: np.ndarray,
-        score_func: Callable = mad_score,
-        score_threshold: float = 10,
-        expand_left_sec: float = 1,
-        expand_right_sec: float = 2,
-        buffer_sec: float = 1,
-        jump_artifact_cutoff: float = 20,
-        n_chunks: int = 100,
-        ) -> pd.DataFrame:
-    '''
-    Detect spike and jump artifacts by detecting outlying derivative scores (ODS). 
-    Args:
-        signal (np.ndarray): experimental signal, photobleach detrended signal is preferred over raw.
-        isosbestic (np.ndarray): isosbestic signal, photobleach detrended signal is preferred over raw.
-        time (np.ndarray): time series for signal.
-        score_func (Callable): function for derivative scoring.
-        score_threshold (float): absolute value cutoff for a derivative score to be considered an outlier.
-        expand_left_sec (float): how many seconds to expand artifact boundaries to the left.
-        expand_right_sec (float): how many seconds to expand artifact boundaries to the right.
-        buffer_sec (float): how many seconds before and after the artifact used to calculate baseline difference.
-        jump_artifact_cutoff (float): absolute value cutoff for a baseline difference score to be considered significant,
-         and the artifact to be labeled a jump, instead of a spike.
-        n_chunks (int): number of chunks used to split signal into local enviroments
-    Returns:
-        tuple[np.ndarray, pd.DataFrame]: array of fitted curve and DataFrame of parameters and metrics.
-    '''
-    # convert seconds to indexs
-    freq = len(signal) / (time[-1] - time[0])
-    expand_left = int(expand_left_sec * freq)
-    expand_right = int(expand_right_sec * freq)
-    buffer = int(buffer_sec * freq)
+# --- base classes ---
+@dataclass(slots=True)
+class ArtifactResult:
+    '''Summarizes detected artifacts'''
+    df: pd.DataFrame
+    REQUIRED_COLUMNS = {
+        "type",
+        "start_idx",
+        "stop_idx",
+    }
 
-    # detect artifacts
-    artifact_intervals = detect_outlier_derivatives(
-        signal=signal,
-        score_func=score_func,
-        score_threshold=score_threshold,
-        expand_left=expand_left,
-        expand_right=expand_right,
-    )
+    def __post_init__(self) -> None:
+        if 'type' not in self.df.columns.to_list():
+            self.df['type'] = 'unlabeled'
 
-    # calc artifact metrics and label
-    artifact_df = calc_artifact_metrics(
-        signal=signal,
-        time=time,
-        artifact_intervals=artifact_intervals,
-        buffer=buffer,
-        n_chunks=n_chunks,
-        jump_artifact_cutoff=jump_artifact_cutoff,
-    )
+        missing = self.REQUIRED_COLUMNS - set(self.df.columns)
+        if missing:
+            raise ValueError(f"Missing required artifact columns: {sorted(missing)}")
 
-    # find cor with isosbestic
-    artifact_df['isosbestic_cor'] = calc_artifact_correlation(signal, isosbestic, artifact_intervals)
-
-    return artifact_df
-
-def detect_outlier_derivatives(
-        signal: np.ndarray,
-        score_func = mad_score, 
-        score_threshold: float = 10,
-        expand_left: float = 1,
-        expand_right: float = 1,
-        ) -> np.ndarray:
-
-    # calc derivative
-    delta = np.r_[0.0, np.diff(signal)]
-
-    # find artifact boundaries
-    scores = score_func(delta)
-    outliers = (scores > score_threshold) | (scores < -score_threshold)
-    intervals = boolean_mask_to_intervals(outliers)
-
-    # expand artifact boundaries
-    intervals[:, 0] = intervals[:, 0] - expand_left
-    intervals[:, 1] = intervals[:, 1] + expand_right
-
-    # combine overlaping artifacts
-    intervals = boolean_mask_to_intervals(intervals_to_bool_mask(signal, intervals))
-    return intervals
-
-def calc_artifact_correlation(
-        arr1: np.ndarray,
-        arr2: np.ndarray,
-        artifact_intervals: np.ndarray,
-        ) -> np.ndarray:
-    cor = np.zeros(shape=artifact_intervals.shape[0])
-    for i, (start, stop) in enumerate(artifact_intervals):
-        idxs = np.arange(start, stop)
-        res = spearmanr(arr1[idxs], arr2[idxs])
-        cor[i] = res.statistic # type: ignore
-    return cor
-
-def score_baseline_diffs_locally(
-        signal: np.ndarray,
-        artifact_df: pd.DataFrame,
-        n_chunks: int = 100,
-        ) -> np.ndarray:
-    df = artifact_df.copy()
-
-    # calc artifact durations and centers
-    art_idx_dur = df['stop_idx'] - df['start_idx']
-    avg_idx_dur = int(art_idx_dur.mean())
-    art_centers = df[['start_idx', 'stop_idx']].mean(axis=1).astype(int).to_numpy()
-
-    # calc derivative
-    derv = np.diff(signal, prepend=signal[0])
-
-    # chunk signal and diff arrays
-    chunk_size = int(np.ceil(signal.size / n_chunks))
-    chunk_labels = np.clip(np.arange(signal.size) // chunk_size, 0, n_chunks - 1)
-    art_chunks = np.clip(art_centers // chunk_size, 0, n_chunks - 1)
+    @property   
+    def types(self) -> list:
+        return self.df['type'].unique().tolist()
     
-    # build chunk derv metrics
-    derv_medians = np.array([np.median(derv[chunk_labels == c]) for c in range(n_chunks)])
-    derv_mads = np.array([median_abs_deviation(derv[chunk_labels == c]) for c in range(n_chunks)])
-
-    # score baseline diffs
-    bs_diffs = df['baseline_change'].to_numpy() / art_idx_dur
-    bs_diff_scores = 0.6745 * (bs_diffs - derv_medians[art_chunks]) / median_abs_deviation(derv_mads[art_chunks])
-    return bs_diff_scores
-
-def calc_artifact_metrics(
-        signal: np.ndarray, 
-        time: np.ndarray, 
-        artifact_intervals: np.ndarray, 
-        buffer: int = 100, 
-        n_chunks: int = 100, 
-        jump_artifact_cutoff: float = 5
-        ) -> pd.DataFrame:
-    n_artifacts = artifact_intervals.shape[0]
-
-    # calc duration
-    duration = time[artifact_intervals[:, 1]] - time[artifact_intervals[:, 0]] 
-
-    # calc baseline before and after
-    idx_before = artifact_intervals[:, 0][:, np.newaxis] + np.arange(-buffer+1, 1)
-    idx_after = artifact_intervals[:, 1][:, np.newaxis] + np.arange(buffer)
-
-    bs_before = np.mean(signal[idx_before], axis=1)
-    bs_after = np.mean(signal[idx_after], axis=1)
-    bs_diff = bs_after - bs_before
-
-    # calc amplitude
-    amplitude = np.zeros(shape=n_artifacts, dtype=float)
-    for i, (start, stop) in enumerate(artifact_intervals):
-        zeroed_sig = signal[start:stop] - bs_before[i]
-        amplitude[i] = zeroed_sig[np.argmax(np.abs(zeroed_sig))]
+    @property
+    def groups(self) -> dict[str, pd.DataFrame]:
+        res: dict[str, pd.DataFrame] = dict(tuple(self.df.groupby('type')))
+        return res
     
-    # package result
-    res = pd.DataFrame(dict(
-        type = 'unlabeled',
-        amplitude = amplitude,
-        duration = duration,
-        baseline_change = bs_diff,
-        baseline_before = bs_before,
-        baseline_after = bs_before,
-        start_idx = artifact_intervals[:, 0],
-        stop_idx = artifact_intervals[:, 1],
-    ))
-
-    # score baseline diff locally
-    res['baseline_change_score'] = score_baseline_diffs_locally(
-        signal=signal,
-        artifact_df=res,
-        n_chunks=n_chunks,
-    )
-
-    # assign labels
-    res.loc[res['baseline_change_score'].abs() < jump_artifact_cutoff, 'type'] = 'spike'
-    res.loc[res['baseline_change_score'].abs() >= jump_artifact_cutoff, 'type'] = 'jump'
+    @property
+    def group_intervals(self) -> dict[str, np.ndarray]:
+        out = {}
+        for label, idxs in self.df.groupby('type').indices.items():
+            out[label] = self.df.filter(['start_idx', 'stop_idx']).iloc[idxs].to_numpy()
+        return out
     
-    return res
-
-# --- artifact correction ---
-def correct_jump_artifacts(
-        signal: np.ndarray,
-        baseline_jumps: np.ndarray,
-        starts: np.ndarray,
-        stops: np.ndarray,
-        ) -> np.ndarray:
-    cum_drifts = np.r_[0.0, baseline_jumps.cumsum()]
-    intervals = np.r_[0, stops, len(signal)]
-    windows = [slice(intervals[i], intervals[i+1]) for i in range(0, intervals.size - 1)]
-
-    corrected = signal.copy()
-    for window, drift in zip(windows, cum_drifts):
-        corrected[window] = corrected[window] - drift
-    return corrected
-
-
-def fill_artifact_with_cubic_spline(
-        signal: np.ndarray, 
-        time: np.ndarray, 
-        start: int, 
-        stop: int, 
-        anchor_left_sec: float = 1, 
-        anchor_right_sec: float = 1, 
-        ) -> np.ndarray:
+    @property
+    def intervals(self) -> np.ndarray:
+        return self.df[['start_idx', 'stop_idx']].to_numpy()
     
-    freq = len(signal) / (time[-1] - time[0])
-    n_anchor_left = int(anchor_left_sec * freq)
-    n_anchor_right = int(anchor_right_sec * freq)
+    @property
+    def score(self) -> float:
+        return np.sum(np.log10(self.df['amplitude']) * self.df['duration'])
     
-    idxs = np.concatenate(
-        [np.arange(start - n_anchor_left, start), np.arange(stop, stop + n_anchor_right)]
-    )
+    def calculate_metrics(
+            self, 
+            signal: np.ndarray, 
+            time: np.ndarray,
+            buffer: int = 100,
+            ) -> None:
+        n_artifacts = self.intervals.shape[0]
 
-    anchors_y = signal[idxs]
-    anchors_x = time[idxs]
+        # calc duration
+        start_time = time[self.intervals[:, 0]] 
+        stop_time = time[self.intervals[:, 1]]
+        duration = stop_time - start_time
 
-    spline = PchipInterpolator(x=anchors_x, y=anchors_y)
-    patch_idxs = np.arange(start, stop)
-    patch = spline(time[patch_idxs])
-    
-    signal[patch_idxs] = patch
-    return signal
+        # calc baseline before and after
+        bs_before, bs_after, bs_diff = self.calc_baseline_change(signal=signal, buffer=buffer)
 
-def correct_artifacts(
-        signal: np.ndarray, 
-        time: np.ndarray, 
-        artifacts: pd.DataFrame, 
-        anchor_left_sec: float = 1, 
-        anchor_right_sec: float = 1,
-        correct_jumps: bool = True,
-        ) -> np.ndarray:
-    corrected = signal.copy()
+        # calc amplitude
+        amplitude = np.zeros(shape=n_artifacts, dtype=float)
+        for i, (start, stop) in enumerate(self.intervals):
+            zeroed_sig = signal[start:stop] - bs_before[i]
+            amplitude[i] = zeroed_sig[np.argmax(np.abs(zeroed_sig))]
 
-    if correct_jumps:
-        jump_artifacts = artifacts.loc[artifacts['type'] == 'jump']
-        corrected = correct_jump_artifacts(
-            corrected, 
-            baseline_jumps=jump_artifacts['baseline_change'], 
-            starts=jump_artifacts['start_idx'], 
-            stops=jump_artifacts['start_idx']
+        # save results
+        self.df = self.df.assign(
+            amplitude = amplitude,
+            duration = duration,
+            baseline_change = bs_diff,
+            start_time = start_time,
+            stop_time = stop_time,
         )
 
-    for i, row in artifacts.iterrows():
-        corrected = fill_artifact_with_cubic_spline(
-            corrected, time, 
-            start=row['start_idx'], stop=row['stop_idx'], 
-            anchor_left_sec=anchor_left_sec, anchor_right_sec=anchor_right_sec
+    def calc_baseline_change(
+            self,
+            signal: np.ndarray,
+            buffer: int = 100,
+            ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        
+        # calc baseline before and after
+        idx_before = self.intervals[:, 0][:, np.newaxis] + np.arange(-buffer+1, 1)
+        idx_after = self.intervals[:, 1][:, np.newaxis] + np.arange(buffer)
+
+        bs_before = np.median(signal[idx_before], axis=1)
+        bs_after = np.median(signal[idx_after], axis=1)
+        bs_diff = bs_after - bs_before
+
+        return bs_before, bs_after, bs_diff
+
+        
+
+class ArtifactDetector(ABC):
+    @abstractmethod
+    def detect(self, signal: np.ndarray, reference: np.ndarray | None, time: np.ndarray,) -> ArtifactResult:
+        pass
+
+    def _calc_artifact_correlation(
+            self,
+            signal: np.ndarray,
+            reference: np.ndarray,
+            artifact_intervals: np.ndarray,
+            ) -> np.ndarray:
+        cor = np.zeros(shape=artifact_intervals.shape[0])
+        for i, (start, stop) in enumerate(artifact_intervals):
+            idxs = np.arange(start, stop)
+            res = spearmanr(signal[idxs], reference[idxs])
+            cor[i] = res.statistic # type: ignore
+        return cor
+
+class ArtifactCorrector:
+    @abstractmethod
+    def correct(self, signal: np.ndarray, time: np.ndarray, artifacts: ArtifactResult,) -> np.ndarray:
+        pass
+    
+    def _correct_jump_artifacts(
+            self,
+            signal: np.ndarray,
+            baseline_jumps: np.ndarray,
+            stops: np.ndarray,
+            ) -> np.ndarray:
+        cum_drifts = np.r_[0.0, baseline_jumps.cumsum()]
+        intervals = np.r_[0, stops, len(signal)]
+        windows = [slice(intervals[i], intervals[i+1]) for i in range(0, intervals.size - 1)]
+
+        corrected = signal.copy()
+        for window, drift in zip(windows, cum_drifts):
+            corrected[window] = corrected[window] - drift
+        return corrected
+    
+# --- detectors ---
+class ODS_Detector(ArtifactDetector):
+    '''Detect spike and jump artifacts based on outlier derivatives'''
+    def __init__(
+            self,
+            score_func: Callable = mad_score,
+            score_threshold: float = 10,
+            jump_score_threshold: float = 10,
+            reference_cor_cutoff: float = 0.5,
+            expand_sec: tuple[float, float] = (1, 2),
+            buffer_sec: float = 1,
+            n_chunks: int = 100,
+            ) -> None:
+        # --- save params ---
+        self.score_func = score_func
+        self.score_threshold = score_threshold
+        self.jump_score_threshold = jump_score_threshold
+        self.reference_cor_cutoff = reference_cor_cutoff
+
+        self.expand_sec = expand_sec
+        self.buffer_sec = buffer_sec
+        self.n_chunks = n_chunks
+
+    # --- main ---
+    def detect(
+            self,
+            signal: np.ndarray,
+            reference: np.ndarray | None,
+            time: np.ndarray,
+            ) -> ArtifactResult:
+        # convert time params to indexs
+        freq = len(signal) / (time[-1] - time[0])
+        expand_left = int(self.expand_sec[0] * freq)
+        expand_right = int(self.expand_sec[1] * freq)
+        buffer = int(self.buffer_sec * freq)
+
+        # detect outlier derivatives
+        artifact_intervals = self._get_outlying_derivatives(
+            signal=signal,
+            score_threshold=self.score_threshold,
+            expand_left=expand_left,
+            expand_right=expand_right,
         )
-    return corrected
+
+        # package results
+        artifacts = ArtifactResult(pd.DataFrame(
+            artifact_intervals, columns=['start_idx', 'stop_idx']
+        ))
+
+        # calc artifact metrics
+        artifacts.calculate_metrics(
+            signal=signal,
+            time=time,
+            buffer=buffer,
+        )
+
+        # label artifacts jumps and spikes
+        jump_scores = self._score_baseline_diffs_locally(
+            signal=signal,
+            artifacts=artifacts,
+            n_chunks=self.n_chunks,
+        )
+
+        artifacts.df['jump_score'] = jump_scores
+        artifacts.df.loc[np.abs(jump_scores) < self.jump_score_threshold, 'type'] = 'spike'
+        artifacts.df.loc[np.abs(jump_scores) >= self.jump_score_threshold, 'type'] = 'jump'
+
+        # if present calculate reference correlation
+        if reference is not None:
+            artifacts.df['reference_cor'] = self._calc_artifact_correlation(
+                signal=signal,
+                reference=reference,
+                artifact_intervals=artifacts.intervals,
+            )
+
+            artifacts.df.drop(
+                artifacts.df['reference_cor'] < self.reference_cor_cutoff,
+                inplace=True,
+                axis=0,
+            )
+        
+        return artifacts
+    
+    def _get_outlying_derivatives(
+            self,
+            signal: np.ndarray,
+            score_threshold: float = 10,
+            expand_left: float = 1,
+            expand_right: float = 2,
+            ) -> np.ndarray:
+        # calc derivative
+        delta = np.r_[0.0, np.diff(signal)]
+
+        # find artifact boundaries
+        scores = self.score_func(delta)
+        outliers = (scores > score_threshold) | (scores < -score_threshold)
+        intervals = boolean_mask_to_intervals(outliers)
+
+        # expand artifact boundaries
+        intervals[:, 0] = intervals[:, 0] - expand_left
+        intervals[:, 1] = intervals[:, 1] + expand_right
+
+        # combine overlaping artifacts
+        intervals = boolean_mask_to_intervals(intervals_to_bool_mask(signal, intervals))
+        return intervals 
+    
+    def _score_baseline_diffs_locally(
+            self,
+            signal: np.ndarray,
+            artifacts: ArtifactResult,
+            n_chunks: int = 100,
+            ) -> np.ndarray:
+        df = artifacts.df.copy()
+
+        # calc artifact durations and centers
+        art_idx_dur = df['stop_idx'] - df['start_idx']
+        art_centers = df[['start_idx', 'stop_idx']].mean(axis=1).astype(int).to_numpy()
+
+        # calc derivative
+        derv = np.diff(signal, prepend=signal[0])
+
+        # chunk signal and diff arrays
+        chunk_size = int(np.ceil(signal.size / n_chunks))
+        chunk_labels = np.clip(np.arange(signal.size) // chunk_size, 0, n_chunks - 1)
+        art_chunks = np.clip(art_centers // chunk_size, 0, n_chunks - 1)
+        
+        # build chunk derv metrics
+        derv_medians = np.array([np.median(derv[chunk_labels == c]) for c in range(n_chunks)])
+        derv_mads = np.array([median_abs_deviation(derv[chunk_labels == c]) for c in range(n_chunks)])
+
+        # score baseline diffs
+        bs_diffs = df['baseline_change'].to_numpy() / art_idx_dur
+        bs_diff_scores = 0.6745 * (bs_diffs - derv_medians[art_chunks]) / median_abs_deviation(derv_mads[art_chunks])
+        return bs_diff_scores
+
+# --- correctors ---
+class Spline_Corrector(ArtifactCorrector):
+    '''Correct spike and jump artifacts using a PCHIP shape-preserving interpolator'''
+    def __init__(
+            self,
+            anchor_sec: tuple[float, float] = (0.2, 0.2),
+            pre_norm: Literal['zscore', 'none'] = 'zscore',
+            correct_spikes: bool = True,
+            correct_jumps: bool = True,
+            ) -> None:
+        self.anchor_sec = anchor_sec
+        self.pre_norm = pre_norm
+        self.correct_spikes = correct_spikes
+        self.correct_jumps = correct_jumps
+        super().__init__()
+
+    def correct(
+            self,
+            signal: np.ndarray,
+            time: np.ndarray,
+            artifacts: ArtifactResult,
+            ) -> np.ndarray:
+        # copy signal
+        corrected = signal.copy()
+
+        # convert time params to index
+        freq = len(signal) / (time[-1] - time[0])
+        anchor_left = int(self.anchor_sec[0] * freq)
+        anchor_right = int(self.anchor_sec[1] * freq)
+
+        # fill spike artifacts with spline if desired
+        if self.correct_spikes:
+            spikes = artifacts.groups['spike']
+            for i, row in spikes.iterrows():
+                corrected = self._fill_artifact_with_cubic_spline(
+                    signal=corrected,
+                    time=time,
+                    start_idx=row['start_idx'],
+                    stop_idx=row['stop_idx'],
+                    anchor_left=anchor_left,
+                    anchor_right=anchor_right,
+                )
+
+        # correct jump artifacts if desired
+        if self.correct_jumps:
+            # recalc baseline jumps
+            bs_before, bs_after, bs_diff = artifacts.calc_baseline_change(signal=corrected)
+            jump_mask = artifacts.df['type'] == 'jump'
+
+            # apply baseline correction
+            corrected = self._correct_jump_artifacts(
+                signal=corrected,
+                baseline_jumps=bs_diff[jump_mask],
+                stops=artifacts.df.loc[jump_mask, 'stop_idx'],
+            )
+
+            # apply post spike correction
+            for i, row in artifacts.df.loc[jump_mask].iterrows():
+                corrected = self._fill_artifact_with_cubic_spline(
+                    signal=corrected,
+                    time=time,
+                    start_idx=row['start_idx'],
+                    stop_idx=row['stop_idx'],
+                    anchor_left=anchor_left,
+                    anchor_right=anchor_right,
+                )
+
+
+        # undue normalization transformation
+        #corrected = (corrected * og_std) + og_mean
+        
+        return corrected
+
+    def _fill_artifact_with_cubic_spline(
+            self,
+            signal: np.ndarray,
+            time: np.ndarray,
+            start_idx: int,
+            stop_idx: int,
+            anchor_left: int,
+            anchor_right: int,
+            ) -> np.ndarray:
+        # construct anchors
+        idxs = np.concatenate(
+            [np.arange(start_idx - anchor_left, start_idx), np.arange(stop_idx, stop_idx + anchor_right)]
+        )
+        anchors_y = signal[idxs]
+        anchors_x = time[idxs]
+
+        # apply spline
+        spline = PchipInterpolator(x=anchors_x, y=anchors_y)
+        patch_idxs = np.arange(start_idx, stop_idx)
+        patch = spline(time[patch_idxs])
+        signal[patch_idxs] = patch
+        return signal

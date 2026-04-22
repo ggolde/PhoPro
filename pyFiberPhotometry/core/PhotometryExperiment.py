@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Literal
+from typing import Any, Literal, Callable
 from scipy.signal import butter, sosfiltfilt
 from sklearn.metrics import r2_score, mean_squared_error
 
@@ -10,6 +10,7 @@ import pandas as pd
 
 from .PhotometeryData import PhotometryData
 
+from ..analysis.artifact import ArtifactResult, ArtifactDetector, ArtifactCorrector
 from ..utils.ops import (
     downsample_1d, reconstruct_time_points, 
     zscore_signal, center_signal, mad_norm_signal, amp_norm_signal,
@@ -25,8 +26,12 @@ class PhotometryExperiment:
     events: dict[str, np.ndarray]
     raw_signal: np.ndarray
     raw_isosbestic: np.ndarray | None
-    frequency: float
     time: np.ndarray
+    frequency: float
+    artifacts: ArtifactResult | None
+
+    signal: np.ndarray
+    fitted_ref: np.ndarray
     trial_data: PhotometryData
 
     def __init__( 
@@ -34,9 +39,9 @@ class PhotometryExperiment:
             raw_signal: np.ndarray,
             raw_isosbestic: np.ndarray | None,
             time: np.ndarray,
-            frequency: float | None = None,
             events: dict = {},
             metadata: dict = {},
+            frequency: float | None = None,
             ):
         """Initialize a photometry experiment.
 
@@ -45,23 +50,35 @@ class PhotometryExperiment:
             raw_isosbestic (np.ndarray): Raw isosbestic channel values. If
                 ``None``, experiment is assumed to be single channel.
             time (np.ndarray): Time points corresponding to the raw signals.
-            frequency (float | None, optional): Sampling frequency in Hz. If
-                ``None`` (default), it is estimated from ``raw_signal`` and
-                ``time``.
             events (dict, optional): Mapping of event labels to timestamp
                 arrays. Defaults to ``{}``.
             metadata (dict, optional): Additional experiment metadata. Defaults
                 to ``{}``.
+            frequency (float | None, optional): Sampling frequency in Hz. If
+                ``None`` (default), it is estimated from ``raw_signal`` and
+                ``time``.
         """
+        # save inputs
         self.raw_signal = raw_signal
         self.raw_isosbestic = raw_isosbestic
         self.time = time
         self.events = events
         self.metadata = metadata
+        self.frequency = raw_signal.size / (self.time.max() - self.time.min() + 1) if frequency is None else frequency
 
-        self.frequency = raw_signal.size / (self.time.max() - self.time.min()) if frequency is None else frequency
-        self.metadata['frequency'] = frequency
+        self.signal = None
+        self.fitted_ref = None
+        self.trial_data = None
+        
+        # add relevant metadata
+        self.metadata['frequency'] = self.frequency
+        self.metadata['channel_mode'] = self.channel_mode
 
+    # --- properties ---
+    @property
+    def has_isosbestic(self) -> bool: return self.raw_isosbestic is not None
+    @property
+    def channel_mode(self) -> Literal['single', 'dual']: return 'dual' if self.has_isosbestic else 'single'
 
     # --- import methods ---
     @classmethod
@@ -114,117 +131,179 @@ class PhotometryExperiment:
             self,
             cutoff_frequency: float = 3.0, 
             order: int = 4,
-            iso_correction_method: Literal['dF/F', 'dF', 'none'] = 'dF/F',
-            signal_normalization: Literal['zscore', 'nullZ', 'none'] = 'none',
-            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
+            signal_normalization: Literal['zscore', 'nullZ', 'none'] | Callable = 'none',
+            correction_method: Literal['dF/F', 'dF', 'dB/B', 'dB', 'none'] | Callable = 'dF/F',
+            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] | Callable = 'IRLS',
             maxiter: int = 1000,
             c: float | None = 3,
-            detrend_bleaching: bool = False,
+            artifact_detector: ArtifactDetector | None = None,
+            artifact_corrector: ArtifactCorrector | None = None,
             ) -> None:
         """Low-pass filter and preprocess the signal using isosbestic fitting.
 
         Args:
             cutoff_frequency (float, optional): Low-pass cutoff frequency in Hz.
                 Values between 1 and 5 recommended. Defaults to ``3.0``.
+
             order (int, optional): Butterworth filter order. 
                 Values >3 are recommended. Defaults to ``4``.
-            iso_correction_method (Literal['dF/F', 'dF', 'none'], optional):
-                Isosbestic correction method, ``'dF/F'`` ((signal - fitted isobestic) / fitted isosbestic)
-                or ``'dF'`` (signal - fitted isobestic). Defaults to ``'dF/F'``.
-            signal_normalization (Literal['zscore', 'nullZ', 'none'], optional): 
+
+            correction_method (Literal['dF/F', 'dF', 'dB/B', 'dB', 'none'] | Callable, optional):
+                Reference trace correction method:  
+                * ``'dF/F'`` and ``'dB/B`` = (signal - fitted reference) / fitted reference
+                * ``'dF'`` and ``'dB'`` = (signal - fitted reference) 
+                For dual channel experiments the reference is the isosbestic, for single channel
+                it is a fit photobleaching curve. Use ``'dF/F'`` or ``'dF'`` for dual channel
+                and ``'dB/B'`` or ``'dB'`` for single channel.
+                A custom function that takes in the positional arguements ``signal``, ``fitted_reference``
+                and returns a 1D ``np.ndarray`` can also be passed. Defaults to ``'dF/F'``.
+
+            signal_normalization (Literal['zscore', 'nullZ', 'none'] | Callable, optional): 
                 Method for whole-signal normalization; ``'none'``
                 for dF/F and ``'zscore'`` for dF is recommended. 
+                A custom function that takes in the positional arguements ``signal``
+                and returns a 1D ``np.ndarray`` can also be passed.
                 Defaults to ``'none'``.
-            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept',
-                'OLS_no_intercept'], optional): Model used to fit isosbestic to experimental signal.
-                IRLS methods recommended. Use a no intercept type model if large global
-                change is present in the experimental signal.
+
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] | Callable, optional): 
+                Model used to fit isosbestic to experimental signal. IRLS methods recommended. 
+                Use a no intercept type model if large global change is present in the experimental signal.
+                A custom function that takes in the positional arguements ``signal``, ``isosbestic``
+                and returns a 1D ``np.ndarray`` and a sequence of params can also be passed.
+                Note custom functions will only apply to isosbestic fits (i.e. dual channel experiments).
                 Defaults to ``'IRLS'``.
+
             maxiter (int, optional): Maximum iterations of the IRLS isosbestic
                 fit. Defaults to ``1000``.
+
             c (float | None, optional): Constant for IRLS fits; smaller values
                 mean more agressive downweighting. ``1.4 <= c <= 3`` is
                 recommended unless there is large global drift in the
                 experimental signal, in which case large values (>5) are better.
                 Defaults to ``3``.
-            detrend_bleaching (bool, optional): Whether to detrend signals for
-                photobleaching using a (signal - fitted bleach) / fitted bleach scheme.
-                Only recommended if using no or ``'dF'`` isosbestic correction.
-                Defaults to ``False``.
+
+            artifact_detector (ArtifactDetector | None, optional): Detector object with method
+                ``.detect(signal, reference, time)`` used to detect artifacts.
+                If ``None``, detection is skipped. Defaults to ``None``.
+
+            artifact_corrector (ArtifactCorrector | None, optional): Corrector object with method
+                ``.correct(signal, time, artifacts)`` used to correct artifacts.
+                If ``None``, correction is skipped. Defaults to ``None``.
 
         Returns:
             None
+
+        Raises:
+            ValueError: 
+                * If ``correction_method`` is incompatible with ``self.channel_mode``
+                * If ``artifact_corrector`` specified but not ``artifact_detector``
         """
-        # filter high frequency noise
+        # validate inputs
+        dual_channel_methods = ['dF/F', 'dF']
+        single_channel_methods = ['dB/B', 'dB']
+
+        if self.channel_mode == 'single' and correction_method in dual_channel_methods:
+            raise ValueError(f'Correction methods {",".join(dual_channel_methods)} are for dual channel experiments.')
+        
+        if self.channel_mode == 'dual' and correction_method in single_channel_methods:
+            raise ValueError(f'Correction methods {",".join(single_channel_methods)} are for single channel experiments.')
+        
+        if artifact_corrector is not None and artifact_detector is None:
+            raise ValueError(f'artifact_detector not specified but artifact_corrector is.')
+
+        # apply lowpass butterworth filter
         filt_sig = self.low_frequency_pass_butter(
             self.raw_signal, 
             self.frequency,
             cutoff_frequency=cutoff_frequency,
             order=order
         )
-        # check if isosbestic present
-        if self.raw_isosbestic is not None:
+
+        if self.channel_mode == 'dual':
+            # apply lowpass to isosbestic
             filt_iso = self.low_frequency_pass_butter(
                 self.raw_isosbestic, 
                 self.frequency,
                 cutoff_frequency=cutoff_frequency,
                 order=order
             )
-            
+
             # trim to minimum length
             min_len = min(filt_sig.size, filt_iso.size)
             filt_sig = filt_sig[:min_len]
             filt_iso = filt_iso[:min_len]
 
-            # detrend photobleaching (optional)
-            if detrend_bleaching:
-                filt_sig = self.detrend_photobleching(filt_sig)
-                filt_iso = self.detrend_photobleching(filt_iso)
-
             # fit isosbestic to signal
-            fitted_iso, r2_val, coeff = self.fit_isosbestic_to_signal(
+            fitted_ref, r2_val, coeffs = self.fit_isosbestic_to_signal(
                 filt_sig, 
                 filt_iso,
                 maxiter=maxiter,
                 fit_using=fit_using,
                 c=c,
             )
-            # add relevant metadata
-            self.metadata['isosbestic_fit'] = {'r2_val' : r2_val, 'coeffs' : coeff}
-            self.fitted_isosbestic = fitted_iso
-        else:
-            filt_iso = None
-            fitted_iso = None
+            reference_type = 'isosbestic'
         
-        # save processed signals
-        self.processed_sig = filt_sig.copy()
-        self.processed_iso = filt_iso.copy()
+        elif self.channel_mode == 'single':
+            # fit photobleaching curve
+            fitted_ref, r2_val, coeffs = self.fit_photobleaching_curve(
+                signal=filt_sig
+            )
+            reference_type = 'photobleaching'
 
-        # procesing / normalization methods
-        self.metadata['signal_processing_method'] = iso_correction_method 
-        match iso_correction_method:
-            case 'dF':
-                self.signal = (filt_sig - fitted_iso)
-            case 'dF/F':
-                self.signal = (filt_sig - fitted_iso) / np.maximum(fitted_iso, np.finfo(np.float32).eps)
-            case 'none':
-                self.signal = filt_sig
-            case _:
-                raise ValueError(f'{iso_correction_method} isosbestic correction method not recognized!')
+        else:
+            raise ValueError(f"Channel mode, {self.channel_mode}, not recognized.")
 
-        match signal_normalization:
-            case 'zscore':
-                self.signal = (self.signal - np.mean(self.signal)) / np.std(self.signal)
-            case 'nullZ':
-                self.signal = self.signal / np.std(self.signal)
-            case 'none':
-                pass
-            case _:
-                raise ValueError(f'{signal_normalization} whole signal normalization method not recognized!')
-
-        self.signal = self.signal.astype(np.float32, copy=False)
-        return
+        # save relevant data
+        self.metadata['reference_fit'] = dict(
+            type = reference_type,
+            r2_val = r2_val,
+            coeffs = coeffs,
+        )
+        self.fitted_ref = fitted_ref
     
+        # apply reference curve correction
+        signal = self._apply_correction_method(
+            correction_method=correction_method,
+            signal=filt_sig,
+            fitted_ref=fitted_ref,
+        )
+
+        # apply signal normalization
+        signal = self._apply_signal_normalization(
+            signal_normalization=signal_normalization,
+            signal=signal,
+        )
+
+        # detect artifacts
+        artifacts = None
+        if artifact_detector is not None:
+            reference = None if self.channel_mode == 'single' else self.fitted_ref
+
+            artifacts = self._detect_artifacts(
+                detector=artifact_detector,
+                signal=signal,
+                reference=reference,
+                time=self.time,
+            )
+
+            # correct artifacts
+            if artifact_corrector is not None:
+                signal = self._correct_artifacts(
+                    corrector=artifact_corrector,
+                    artifacts=artifacts,
+                    signal=signal,
+                    time=self.time,
+                )
+
+        # save results and end pipeline
+        self.signal = signal
+        self.artifacts = artifacts
+
+        if callable(correction_method): self.metadata['correction_method'] = correction_method.__name__
+        else: self.metadata['correction_method'] = correction_method
+
+        return
+        
     def extract_trial_data(
             self,
             align_to: str,
@@ -232,7 +311,7 @@ class PhotometryExperiment:
             trial_bounds: tuple[float, float],
             baseline_bounds: tuple[float, float] | None = None,
             event_tolerences: dict[str, tuple[float, float]] = {},
-            trial_normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] = 'none',
+            trial_normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] | Callable = 'none',
             check_overlap: bool = True,
             time_error_threshold: float = 0.1,
             event_conflict_logic: Literal['first', 'last', 'mean'] = 'first',
@@ -241,32 +320,47 @@ class PhotometryExperiment:
 
         Args:
             align_to (str): Event label used to align and identify trial, should be one per trial.
+
             center_on (list[str]): Event labels to center trial windows on.
                 Events should be mutually exclusive (i.e. lever press choice).
                 If no ``center_on`` events are present within an identified
                 trial, ``align_to`` will be centered on.
+
             trial_bounds (tuple[float, float]): Trial window bounds relative to
                 ``center_on`` events.
+
             baseline_bounds (tuple[float, float] | None, optional): Baseline
                 window bounds relative to ``align_to`` event used for per-trial
                 normalizations. Defaults to ``None``.
+
             event_tolerences (dict[str, tuple[float, float]], optional): Time
                 tolerances for event annotation, relative to ``align_to``.
                 Defaults to ``{}``.
-            trial_normalization (Literal['zscore', 'zero', 'mad', 'amp',
-                'none'], optional): Normalization method for trial signals
-                based on baselines. Defaults to ``'none'``.
+
+            trial_normalization (Literal['zscore', 'zero', 'mad', 'amp', 'none'] | Callable, optional):
+                Normalization method for trial signals based on baselines.
+                A custom function that takes in the positional arguements 
+                ``trial_signals``, ``baseline_signals`` and returns a 2D 
+                ``np.ndarray`` of shape (n_trials, n_times) can also be passed.
+                Defaults to ``'none'``.
+
             check_overlap (bool, optional): Whether to throw an error when
                 multiple ``center_on`` events are found in the same trial.
                 Defaults to ``True``.
+
             time_error_threshold (float, optional): Maximum allowed mean timing
                 error. Defaults to ``0.1``.
+
             event_conflict_logic (Literal['first', 'last', 'mean'], optional):
                 Logic for choosing center-on event timestamps if multiple of the
                 same event are present. Defaults to ``'first'``.
 
         Returns:
             None
+
+        Raises:
+            ValueError: If ``baseline_bounds`` is ``None`` and ``trial_normalization``
+                requires baselines.
         """
         # validate inputs
         if align_to not in self.events: 
@@ -326,6 +420,8 @@ class PhotometryExperiment:
 
         # apply trial-wise normalization method
         match trial_normalization:
+            case func if callable(func):
+                trial_signals = trial_normalization(raw_trial_signals, baseline_signals)
             case 'zscore':
                 trial_signals = zscore_signal(raw_trial_signals, baseline_signals)
             case 'zero':
@@ -400,7 +496,7 @@ class PhotometryExperiment:
             self, 
             signal: np.ndarray, 
             isosbestic: np.ndarray, 
-            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
+            fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] | Callable = 'IRLS',
             maxiter: int = 1000,
             c: float | None = None,
             ) -> tuple[np.ndarray, float, Any]:
@@ -409,9 +505,8 @@ class PhotometryExperiment:
         Args:
             signal (np.ndarray): Filtered signal trace.
             isosbestic (np.ndarray): Filtered isosbestic trace.
-            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept',
-                'OLS_no_intercept'], optional): Model used to fit isosbestic.
-                Defaults to ``'IRLS'``.
+            fit_using (Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] | Callable, optional): 
+                Model used to fit isosbestic. Defaults to ``'IRLS'``.
             maxiter (int, optional): Maximum iterations of IRLS isosbestic fit.
                 Defaults to ``1000``.
             c (float | None, optional): Constant for IRLS fits; smaller values
@@ -424,6 +519,8 @@ class PhotometryExperiment:
         """
         # fit using specified model
         match fit_using:
+            case func if callable(func):
+                fitted_iso, params = fit_using(signal, isosbestic)
             case 'OLS':
                 fitted_iso, params = OLS_fit(signal, isosbestic, add_intercept=True)
             case 'IRLS':
@@ -441,33 +538,11 @@ class PhotometryExperiment:
         r2_val = r2_score(signal, fitted_iso)
         return fitted_iso, r2_val, params
     
-    def detrend_photobleching(
-            self,
-            signal: np.ndarray,
-            window_dur: float = 5,
-            ) -> np.ndarray:
-        """Detrend photobleaching from a signal.
-        
-        Uses a ``(signal - bleach) / bleach`` scheme. See ``fit_photobleaching_curve()``
-        for details of fit method.
-
-        Args:
-            signal (np.ndarray): One-dimensional signal array.
-            window_dur (float, optional): Length of the window in seconds used
-                for sliding-window median downsampling. Defaults to ``5``.
-
-        Returns:
-            np.ndarray: Detrended signal computed as
-                ``(signal - bleach) / bleach``.
-        """
-        fitted_curve, fitted_params = self.fit_photobleaching_curve(signal=signal, window_dur=window_dur)
-        return (signal - fitted_curve) / fitted_curve
-    
     def fit_photobleaching_curve(
             self,
             signal: np.ndarray, 
             window_dur: float =  5,
-            ) -> tuple[np.ndarray, list[float]]:
+            ) -> tuple[np.ndarray, float, list[float]]:
         """Fit a curve with a negative bi-exponential photobleaching model.
         Uses a soft_l1 least squares to fit to the sliding-window median 
         downsampled signal.
@@ -483,12 +558,79 @@ class PhotometryExperiment:
         """
         window_len = int(window_dur * self.frequency)
         fitted_curve, params = fit_photobleaching(signal, self.time, window=window_len)
-
-        # TODO: delete or implement?
         r2_val = r2_score(signal, fitted_curve)
-        mse_val = mean_squared_error(signal, fitted_curve)
         
-        return fitted_curve, params
+        return fitted_curve, r2_val, params
+    
+    # --- hidden signal preprocess helpers ---
+    def _apply_correction_method(
+            self,
+            correction_method: Literal['dF/F', 'dF', 'dB/B', 'dB', 'none'] | Callable,
+            signal: np.ndarray,
+            fitted_ref: np.ndarray,
+            ) -> np.ndarray:
+        
+        match correction_method:
+            case func if callable(func):
+                out: np.ndarray = correction_method(signal, fitted_ref)
+            case 'dF' | 'dB':
+                out = (signal - fitted_ref)
+            case 'dF/F' | 'dB/B':
+                out = (signal - fitted_ref) / np.maximum(fitted_ref, np.finfo(np.float32).eps)
+            case 'none':
+                out = signal
+            case _:
+                raise ValueError(f'{correction_method} isosbestic correction method not recognized!')
+        return out
+    
+    def _apply_signal_normalization(
+            self,
+            signal_normalization: Literal['zscore', 'nullZ', 'none'] | Callable,
+            signal : np.ndarray,
+            ) -> np.ndarray:
+        
+        match signal_normalization:
+            case func if callable(func):
+                out: np.ndarray = signal_normalization(signal)
+            case 'zscore':
+                out = (signal - np.mean(signal)) / np.std(signal)
+            case 'nullZ':
+                out = signal / np.std(signal)
+            case 'none':
+                out = signal
+            case _:
+                raise ValueError(f'{signal_normalization} whole signal normalization method not recognized!')
+        return out
+    
+    def _detect_artifacts(
+            self,
+            detector: ArtifactDetector,
+            signal: np.ndarray,
+            reference: np.ndarray,
+            time: np.ndarray,
+            ) -> ArtifactResult:
+        
+        artifacts = detector.detect(
+            signal=signal,
+            reference=reference,
+            time=time,
+        )
+        return artifacts
+    
+    def _correct_artifacts(
+            self,
+            corrector: ArtifactCorrector,
+            artifacts: ArtifactResult,
+            signal: np.ndarray,
+            time: np.ndarray,
+            ) -> np.ndarray:
+        
+        corrected = corrector.correct(
+            signal=signal,
+            time=time,
+            artifacts=artifacts,
+        )
+        return corrected
     
     # --- extraction of trial-wise data ---
     def find_interval_bounds(self, series: np.ndarray, centers: np.ndarray, bounds: tuple[int, int]) -> np.ndarray:
@@ -676,7 +818,7 @@ class PhotometryExperiment:
                 after median centering. Defaults to ``0.075``.
 
         Returns:
-            bool: ``True`` if the signal is classified as poor quality.
+            is_poor_signal (bool): ``True`` if the signal is classified as poor quality.
         """
         median_centered = trial_signal - np.median(trial_signal, axis=1, keepdims=True)
         abs_max = np.abs(median_centered).max(axis=1)
@@ -684,38 +826,89 @@ class PhotometryExperiment:
         return is_poor_signal
 
     # --- graphing ---
-    def dashboard(self, save: str | None = None) -> None:
+    def dashboard(self, save: str | None = None, downsample: int = 20) -> None:
         """Plot a quick dashboard for the experiment.
 
-        Plots the raw, fitted, and processed signal, isosbestic trace, and the
-        fitted photobleaching curve when available.
+        Plots the raw, fitted, and, if ``.preprocess_signal()`` has been run, 
+        processed signal, isosbestic trace, and the fitted photobleaching curve 
+        if available.
 
         Args:
             save (str | None, optional): Path to save the figure. If ``None``,
                 the figure is not saved. Defaults to ``None``.
+            downsample (int | optional): Downsample factor for signals before
+                plotting. Defaults to 20.
 
         Returns:
             None
         """
+        # determine is self.process_singal has been run
+        if self.fitted_ref is not None:
+            fig = self.dashboard_full()
+        else:
+            fig = self.dashboard_raw()
+
+        if save is not None:
+            plt.savefig(save, bbox_inches='tight')
+
+    def dashboard_raw(self, downsample: int = 20):
+        # down sample series
+        x = downsample_1d(self.time, downsample)
+        raw_sig = downsample_1d(self.raw_signal, downsample)
+
+        fig, ax = plt.subplots(figsize=(6, 4), dpi=140)
+        fig.tight_layout()
+        
+        # raw signals
+        ax: matplotlib.axes.Axes
+        ax.plot(x, raw_sig, label='Raw Signal', c='#1f77b4')
+
+        # plot isosbestic if it is avaliable
+        if self.raw_isosbestic is not None:
+            raw_iso = downsample_1d(self.raw_isosbestic, downsample)
+            ax.plot(x, raw_iso, label='Raw Iso.', c="#4B4B4B", alpha=0.9)
+        
+        ax.legend()
+
+        # annotate
+        ax.set_title(
+        f"Dashboard for {getattr(self, 'id', 'Unnamed')}"
+        )
+        ax.set_ylabel('Signal amplitude (a.u.)')
+        ax.set_xlabel('Time (s)')
+
+        return fig
+    
+    def dashboard_full(self, downsample: int = 20):
+        if self.signal is None:
+            raise ValueError(f"Process signal not avaliable, please run self.preprocess_signal() first.")
+
+
+        x = downsample_1d(self.time, downsample)
+        raw_sig = downsample_1d(self.raw_signal, downsample)
+        fit_params = getattr(self, 'fitted_params', None)
+        final_sig = downsample_1d(self.signal, downsample)
+
         fig, (ax1, ax2) = plt.subplots(
             ncols=1, nrows=2, 
             sharex=True, figsize=(6, 6), dpi=140,
             gridspec_kw={'height_ratios': [3, 1]})
         fig.tight_layout()
-
-        downsample_factor = 20
-        x = downsample_1d(self.time, downsample_factor)
-        raw_sig = downsample_1d(self.raw_signal, downsample_factor)
-        raw_iso = downsample_1d(self.raw_isosbestic, downsample_factor)
-        fit_iso = downsample_1d(self.fitted_isosbestic, downsample_factor)
-        fit_params = getattr(self, 'fitted_params', None)
-        final_sig = downsample_1d(self.signal, downsample_factor)
         
         # raw and fitted signals
         ax1: matplotlib.axes.Axes
         ax1.plot(x, raw_sig, label='Raw Signal', c='#1f77b4')
-        ax1.plot(x, raw_iso, label='Raw Iso.', c="#4B4B4B", alpha=0.9)
-        ax1.plot(x, fit_iso, label='Fitted Iso.', c='#ff7f0e', alpha=0.9)
+
+        if self.channel_mode == 'dual':
+            raw_ref = downsample_1d(self.raw_isosbestic, downsample)
+            fit_ref = downsample_1d(self.fitted_ref, downsample)
+            ax1.plot(x, raw_ref, label='Raw Iso.', c="#4B4B4B", alpha=0.9)
+            ax1.plot(x, fit_ref, label='Fitted Iso.', c='#ff7f0e', alpha=0.9)
+
+        elif self.channel_mode == 'single':
+            fit_ref = downsample_1d(self.fitted_ref, downsample)
+            ax1.plot(x, fit_ref, label='Fitted Bleaching', c='#ff7f0e', alpha=0.9)
+
         if fit_params is not None:
             ax1.plot(x, neg_bi_exponential_5(x, *fit_params), label='Fitted Curve', c="#920000")
         ax1.legend()
@@ -726,7 +919,6 @@ class PhotometryExperiment:
         middle_third = np.array_split(final_sig, 3)[1]
         y_high = np.max(middle_third)
         y_low = np.min(middle_third)
-        print(y_high)
         ax2.plot(x, final_sig, label='Processed Signal', c='#1f77b4')
         ax2.set_ylim(bottom=y_low*y_pad_factor, top=y_high*y_pad_factor)
         ax2.legend()
@@ -736,8 +928,7 @@ class PhotometryExperiment:
         f"Dashboard for {getattr(self, 'id', 'Unnamed')}"
         )
         ax1.set_ylabel('Signal amplitude (a.u.)')
-        ax2.set_ylabel(f"{self.metadata.get('signal_processing_method', 'NOT FOUND')}")
+        ax2.set_ylabel(f"{self.metadata.get('correction_method', 'NOT FOUND')}")
         ax2.set_xlabel('Time (s)')
 
-        if save is not None:
-            plt.savefig(save, bbox_inches='tight')
+        return fig

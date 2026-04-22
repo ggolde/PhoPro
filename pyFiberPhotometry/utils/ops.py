@@ -50,6 +50,8 @@ def downsample_1d(arr: np.ndarray, factor: int) -> np.ndarray:
     Returns:
         np.ndarray: One-dimensional array of mean-pooled values.
     """
+    if factor in (None, 1):
+        return arr
     arr = np.asarray(arr)
     L = len(arr)
     trim = L % factor

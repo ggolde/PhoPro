@@ -14,18 +14,16 @@ from ..utils.ops import downsample_ndarray, downsample_1d, reconstruct_time_poin
 ad.settings.allow_write_nullable_strings = True
 
 class PhotometryData:
-    """Wrap an AnnData object for trial-wise photometry time-series data."""
+    """Handle and analyze trial-wise photometry time-series data."""
+
     adata: ad.AnnData
 
     # --- constructors ---
     def __init__(self, adata: ad.AnnData):
-        """Initialize a `PhotometryData` wrapper from an AnnData object.
+        """Initialize a `PhotometryData` object from an AnnData object.
 
         Args:
             adata (ad.AnnData): AnnData object containing time-series data.
-
-        Returns:
-            None
         """
         assert isinstance(adata, ad.AnnData)
         self.adata = adata
@@ -174,8 +172,10 @@ class PhotometryData:
     def n_trials(self) -> int: return self.adata.n_obs
     @property
     def n_times(self) -> int: return self.adata.n_vars
-    @ property
+    @property
     def freq(self) -> float: return self.n_times / (self.ts[-1] - self.ts[0] + 1)
+    @property
+    def dt(self) -> float: return 1 / self.freq
 
     # --- conveience setters ---
     @X.setter
@@ -413,7 +413,7 @@ class PhotometryData:
 
     def window(
         self,
-        centers: np.ndarray | float | int,
+        centers: np.ndarray | float,
         bounds: tuple[float, float],
         freq: float | None = None,
         series: np.ndarray | None = None,
@@ -422,10 +422,10 @@ class PhotometryData:
         """Return a new `PhotometryData` object with windowed time series.
 
         Args:
-            centers (np.ndarray | float | int): Specified centers of the
-                windows in the same units as ``series``.
-            bounds (tuple[float, float]): Lower and upper bounds of the
+            centers (np.ndarray | float): Specified centers of the
                 windows.
+            bounds (tuple[float, float]): Lower and upper bounds of the
+                windows relative to centers.
             freq (float | None, optional): Frequency of ``series``. If
                 ``None``, ``self.freq`` is used. Defaults to ``None``.
             series (np.ndarray | None, optional): Time-like sorted series that
@@ -466,7 +466,52 @@ class PhotometryData:
         )
         return out
     
+    def area_under_curve(
+            self,
+            centers: np.ndarray | float | None = None,
+            bounds: tuple[float, float] | None = None,
+            transformation: Callable | None = None
+            ) -> np.ndarray:
+        '''Calculate the area under the curve.
+
+        Optionally calculate the area only on specific windows.
+
+        Args:
+            centers (np.ndarray | float): Specified centers of the
+                windows in the same units. If ``None`` the area under the
+                whole curve is calculated. Default is ``None``.
+            bounds (tuple[float, float]): Lower and upper bounds of the
+                windows relative to centers. If ``None`` the area under the
+                whole curve is calculated. Default is ``None``.
+            transformation (Callable | None): If not ``None``, a transformation
+                to apply to the singal before taking the area. Shoule always
+                return an array of the same shape and size. Default is ``None``.
+
+        Returns
+        np.ndarray: an array of areas of length n_trials
+        '''
+        # window signals if necessary
+        if centers is None or bounds is None:
+            y = self.X
+            x = self.ts
+        else:
+            windows = self.window(centers=centers, bounds=bounds)
+            y = windows.X
+            x = windows.ts
+        
+        # transform signals if specified
+        if transformation is not None:
+            y = transformation(y)
+
+        return np.trapezoid(y=y, x=x, axis=1)
+    
     # --- convienience ---
+    def print_info(self) -> None:
+        print(
+            f"Photometry dataset with {self.n_trials} trials, {self.n_times} timepoints, and {self.obs.columns.size} observations"
+        )
+
+
     def get_layer(self, key: str) -> np.ndarray:
         """Get a layer from the underlying AnnData object.
 
@@ -553,7 +598,7 @@ class PhotometryData:
             layer: str | None = None,
             err_layer: str | None = None,
             obs_cols: list[str] | None = None, 
-            downsample: int | None = None,
+            downsample: int | None = 10,
 
             ) -> pd.DataFrame:
         """Translate trial data to long DataFrame format.
@@ -568,7 +613,7 @@ class PhotometryData:
             obs_cols (list[str] | None, optional): Which columns from ``obs``
                 to include. Defaults to ``None``.
             downsample (int | None, optional): How much to downsample the time
-                series data, if at all. Defaults to ``None``.
+                series data, if at all. Defaults to 10.
 
         Returns:
             pd.DataFrame: DataFrame containing ``trial_id``, selected
@@ -607,6 +652,44 @@ class PhotometryData:
             long_signal = long_signal.join(long_err.filter([err_layer]), how='left')
 
         return long_signal
+    
+    def trials_to_wide_df(
+            self,
+            layer: str | None = None,
+            obs_cols: list[str] | None = None,
+            signal_prefix: str = 'photometry',
+            downsample: int = 10,
+            ) -> pd.DataFrame:
+        '''Translate trial data to wide DataFrame format.
+
+        Mostly useful for exporting to ``analysis.FMM`` module.
+
+        Args:
+            layer (str | None, optional): Which layer to export. If ``None``,
+                ``self.X`` is used. Defaults to ``None``.
+            obs_cols (list[str] | None, optional): Which columns from ``obs``
+                to include. Defaults to ``None``, which includes all.
+            downsample (int | optional): How much to downsample the time
+                series data, if at all. Defaults to ``10``.
+
+        Returns:
+            pd.DataFrame: DataFrame containing ``obs_cols`` and signal timepoints
+            in columns ``signal_prefix``.1 ... ``signal_prefix``.n_times.
+        '''
+        if layer is None:
+            signal = downsample_ndarray(self.X, downsample, axis=1)
+        else:
+            signal = downsample_ndarray(self.get_layer(layer), downsample, axis=1)
+
+        sig_columns = signal_prefix + '.' + np.arange(1, signal.shape[1] + 1).astype(str)
+        sig_df = pd.DataFrame(signal, columns=sig_columns)
+
+        obs_df = self.obs.copy() if obs_cols is None else self.obs.filter(obs_cols).copy()
+
+        sig_df.reset_index(drop=True, inplace=True)
+        obs_df.reset_index(drop=True, inplace=True)
+
+        return pd.concat([obs_df, sig_df], axis=1)
 
     # --- plotting ---
     def plot_line(
@@ -694,7 +777,7 @@ class PhotometryData:
             save_dpi: int = 140, 
             plt_kwargs: dict = {},
             ax = None,
-            ):
+            ) -> None:
         """Plot trials grouped by observation columns.
 
         Args:
@@ -732,7 +815,7 @@ class PhotometryData:
             err_layer: str | None = None, 
             plt_kwargs: dict = {},
             ax = None,
-            ):
+            ) -> None:
         """Plot all trials.
 
         Args:

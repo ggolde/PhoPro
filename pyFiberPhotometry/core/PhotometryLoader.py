@@ -163,9 +163,9 @@ class CSVLoader(PhotometryLoader):
         """
         # save fpaths and params
         self.csv = csv
-        self.time_col = time_col,
-        self.sig_col = signal_col,
-        self.iso_col = isosbestic_col,
+        self.time_col = time_col
+        self.sig_col = signal_col
+        self.iso_col = isosbestic_col
         
         self.events_json = events_json
         self.downsample = downsample
@@ -199,7 +199,7 @@ class CSVLoader(PhotometryLoader):
             raw_isosbestic = None
 
         if self.time_col in df: 
-            time = downsample_1d(df[self.iso_col].to_numpy(), self.downsample)
+            time = downsample_1d(df[self.time_col].to_numpy(), self.downsample)
         else: 
             time = None
         

@@ -7,3 +7,8 @@ pyFiberPhotometry.egg-info/
 pyrightconfig.json
 sandbox.ipynb
 test-results
+MANIFEST.in
+.pytest_cache/
+site/
+.github/
+docs/tutorials/Basic_Usage_files

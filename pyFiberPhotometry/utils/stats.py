@@ -130,7 +130,6 @@ def fit_photobleaching(
 
     # clip initial guesses to bounds
     for i, (guess, lower, upper) in enumerate(zip(init_guess, bounds[0], bounds[1])):
-        print(i, guess, lower, upper)
         init_guess[i] = float(np.clip(guess, lower, upper))
 
     res = least_squares(

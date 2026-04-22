@@ -61,8 +61,8 @@ class SimulatedPhotometryGenerator:
         # custom artifacting
         artifact_mask: np.ndarray | None = None,
     ):
-        """
-        Build simulated photometry data.
+        """Build simulated photometry data.
+
         Args:
             T_sec (float): Amount of seconds in data.
             fs (float): Sampling frequency in Hz.
@@ -75,10 +75,13 @@ class SimulatedPhotometryGenerator:
             n_artifacts (int): Number of attenuation artifacts.
             artifact_tau_sec (float): Exponential param for attenuation generation.
             artifact_depth_range (Tuple[float, float]): Fractional bounds for attenuation magnitude.
-            dependent_sigma_* (float): Magnitude of intensity-proportional noise.
-            independent_sigma_* (float): Magnitude of intensity-independent noise.
+            dependent_sigma_exp (float): Magnitude of intensity-proportional noise in experimental signal.
+            independent_sigma_exp (float): Magnitude of intensity-independent noise in experimental signal.
+            dependent_sigma_iso (float): Magnitude of intensity-proportional noise in isosbestic signal.
+            independent_sigma_iso (float): Magnitude of intensity-independent noise in isosbestic signal.
             bleach_params (dict): Params for the negative bi-exponential photobleaching model.
             artifact_mask (np.ndarray | None): Optional multiplicative attenuation mask of shape (N,).
+
         Returns:
             None
         """

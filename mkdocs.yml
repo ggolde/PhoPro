@@ -1,0 +1,60 @@
+site_name: pyFiberPhotometry
+site_url: https://mydomain.org/mysite
+site_description: Documentation for pyFiberPhotometry
+theme:
+  name: material
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+# markdown extensions
+markdown_extensions:
+  - sane_lists
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+# plugins
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            docstring_section_style: list
+            merge_init_into_class: true
+            show_docstring_attributes: false
+            show_docstring_functions: true
+            show_docstring_classes: false
+            show_docstring_modules: false
+            show_signature: true
+            members_order: source
+            filters:
+              - "!^_[^_]"
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Tutorials:
+      - Basic Usage: tutorials/Basic_Usage.md
+  - API:
+      - PhotometryExperiment: api/PhotometryExperiment.md
+      - PhotometryData: api/PhotometryData.md
+      - PhotometryLoader: api/PhotometryLoader.md
+      - SimulatedPhotometryGenerator: api/SimulatedPhotometryGenerator.md

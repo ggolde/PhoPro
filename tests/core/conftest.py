@@ -12,12 +12,11 @@ class DummyExperiment(PhotometryExperiment):
         self.preprocess_signal(
             cutoff_frequency=3.0,
             order=4,
-            iso_correction_method="dF/F",
+            correction_method="dF/F",
             signal_normalization="none",
             fit_using="IRLS",
             maxiter=200,
             c=3,
-            detrend_bleaching=False,
         )
         self.extract_trial_data(
             align_to="event",

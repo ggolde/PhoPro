@@ -1,8 +1,10 @@
-from .core import PhotometryData, PhotometryExperiment, TDTLoader
+from .core import PhotometryData, PhotometryExperiment, PhotometryLoader, TDTLoader, CSVLoader
 from .utils.sim import SimulatedPhotometryGenerator
 __all__ = [
     "PhotometryData",
     "PhotometryExperiment",
-    "SimulatedPhotometryGenerator",
+    "PhotometryLoader",
     "TDTLoader",
+    "CSVLoader",
+    "SimulatedPhotometryGenerator",
 ]

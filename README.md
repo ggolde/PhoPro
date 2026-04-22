@@ -1,44 +1,39 @@
 # **pyFiberPhotometry**
 
-**Python package for processing fiber photometry data**
+*A Python package for extendable and flexible processing and analysis of behavior-coupled fiber photometry experiments.*
 
-`pyFiberPhotometry` provides a framework for loading, processing, analyzing, and simulating behavior-coupled fiber photometry datasets.
- Currently it only natively supports importing data from Tucker-Davis Technologies (TDT) acquisition systems.
- Built around core classes that are subclassed for specific pipeline implementations.
- - PhotometryLoader extracts relevant data from input format.
- - PhotometryExperiment processes and slices signals with many options for processing.
- - PhotometryData holds trial-wise data in an AnnData format. 
+## Overview
+This package provides extensive functionaly for processing, handling, and analyzing fiber photometry datasets while remaining highly extendable to specific use cases. The high level APIs only require basic programming experience. It is built around 4 main modules:
 
- Used internally in the **[Bizon-Setlow lab](https://neuroscience.ufl.edu/profile/bizon-jennifer/)** at the University of Florida.
+* **[PhotometryLoader](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryLoader/)** - loaders for various photometry data formats.
+
+* **[PhotometryExperiment](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryExperiment/)** - a class for processing and windowing photometry experiments with many avaliable preprocessing methods.
+
+* **[PhotometryData](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryData/)** - a class holding trial-wise signals and metadata with advanced filtering, averaging, windowing, and analysis functionality.
+
+* **[SimulatedPhotometryGenerator](https://ggolde.github.io/pyFiberPhotometry/api/SimulatedPhotometryGenerator/)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
+
+**Documentation can be found [here](https://ggolde.github.io/pyFiberPhotometry/).**
 
 ---
 
-## **Installation**
-
-Install from GitHub:
-
-```bash
+## Installation
+You can install directly from GitHub using the command:
+```
 pip install git+https://github.com/ggolde/pyFiberPhotometry.git
 ```
 
+See the [Installation](https://ggolde.github.io/pyFiberPhotometry/installation/) page of the docs for more details.
+
 ---
 
-## **Quick Start**
-
-### **Load and preprocess a TDT fiber photometry session**
+## Example Usage
 
 ```python
 import numpy as np
-from pyFiberPhotometry import PhotometryExperiment, SimulatedPhotometryGenerator, TDTLoader
+from pyFiberPhotometry import PhotometryExperiment, SimulatedPhotometryGenerator
 
-# read data from TDT folder
-exp = PhotometryExperiment.load_TDT(
-    data_folder="path/to/TDT/block",
-    box="A",
-    event_labels=['event']
-)
-
-# or create simulated data
+# create simulated data
 sim = SimulatedPhotometryGenerator(
     T_sec=1000,
     fs=30,
@@ -59,7 +54,7 @@ exp = sim.to_PhotometryExperiment()
 exp.preprocess_signal(
     cutoff_frequency=2,
     order=4,
-    iso_correction_method='dF',
+    correction_method='dF',
     model='IRLS',
     c=1.4,
 )
@@ -85,30 +80,35 @@ avg = trials.collapse(
     count_col='n_trials'
 )
 
+# plot average with errorbars
+avg.plot_all(err_layer='std')
+
 # save data
 trials.write_h5ad('example.h5ad')
 ```
 
-### **Plot a trial**
-
-```python
-trials.plot_line(0)
-```
-
 ---
 
-## **Planned Features**
-This package is still in development, please suggest any features you would like to see implemented!
-- Improve import support for formats other than TDT.
-- Full tutorials and docs.
+## Planned Features
+This package is in ongoing development, please suggest any features you would like to see implemented on the [issues page](https://github.com/ggolde/pyFiberPhotometry/issues). The
+- Implement import support for more formats.
+- More methods for artifact detection and correction.
+- Easier APIs for the cluster based permutation test and functional mixed modeling.
 
-## **License**
+## License
 
 MIT License.
 
----
+## Authors
+This package is developed and used internally at the [Bizon-Setlow Lab](https://burke.neuroscience.ufl.edu/profile/bizon-jennifer/) at the University of Florida.
 
-## **Author**
+**Griffin Golde**: University of Florida, contact: **[ggolde@ufl.edu](mailto:ggolde@ufl.edu)**
 
-**Griffin Golde**: University of Florida,
-contact: **[ggolde@ufl.edu](mailto:ggolde@ufl.edu)**
+## Citations
+
+If you use this package in your work, and want to support the package, use the citation below (a proper publication is hopefully on the horizon):
+
+* Golde G. *pyFiberPhotometry: Python toolkit for simulating, processing, handling, and analyzing fiber photometry data*.
+GitHub repository. Version 0.2.0. Available at: https://github.com/ggolde/pyFiberPhotometry.
+
+Additionally, if you used the FMM module, please review the [recommended reference(s)](https://github.com/gloewing/photometry_FLMM/blob/main/README.md#references) for the ``fast-fmm-rpy2`` package.
