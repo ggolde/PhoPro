@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, Literal, cast
+from typing import Any, Callable, Literal, Self, cast
 from anndata.experimental import concat_on_disk
 
 import matplotlib.pyplot as plt
@@ -36,7 +36,7 @@ class PhotometryData:
         time_points: np.ndarray,
         layers: dict[str, np.ndarray] | None = None,
         metadata: dict[str, Any] | None = None,
-        ) -> "PhotometryData":
+        ) -> Self:
         """Construct `PhotometryData` from arrays and observation metadata.
 
         Args:
@@ -65,7 +65,7 @@ class PhotometryData:
     
     # --- I/O ---
     @classmethod
-    def read_h5ad(cls, path: str) -> "PhotometryData":
+    def read_h5ad(cls, path: str) -> Self:
         """Read a `PhotometryData` object from an `.h5ad` file.
 
         Args:
@@ -77,7 +77,7 @@ class PhotometryData:
         return cls(ad.read_h5ad(path))
     
     @classmethod
-    def read_zarr(cls, path: str) -> "PhotometryData":
+    def read_zarr(cls, path: str) -> Self:
         """Read a `PhotometryData` object from zarr storage.
 
         Args:
@@ -252,7 +252,10 @@ class PhotometryData:
         return obs_agg, X_agg
 
     # --- operations ---
-    def downsample(self, factor: int) -> "PhotometryData":
+    def copy(self) -> Self:
+        return type(self)(self.adata.copy())
+
+    def downsample(self, factor: int) -> Self:
         """Downsample the time dimension of the dataset.
 
         Args:
@@ -270,7 +273,7 @@ class PhotometryData:
             freq_new = freq_cur / factor
             metadata.update({'frequency': freq_new})
 
-        return PhotometryData.from_arrays(
+        return type(self).from_arrays(
             obs=self.obs,
             data=X_new,
             time_points=t_new,
@@ -285,7 +288,7 @@ class PhotometryData:
             join: str = 'inner', 
             merge: str ='same', 
             uns_merge: str = 'same'
-            ) -> None | PhotometryData:
+            ) -> None | Self:
         """Concatenate this object with one or more `PhotometryData` objects.
 
         Args:
@@ -332,7 +335,7 @@ class PhotometryData:
             self.adata = merged_adata
             return
         else:
-            return PhotometryData(merged_adata)
+            return type(self)(merged_adata)
 
     def collapse(
             self,
@@ -342,7 +345,7 @@ class PhotometryData:
             data_cols: list[str] = [],
             collapse_cols: list[str] | None = None,
             count_col: str | None = 'n'
-            ) -> "PhotometryData":
+            ) -> Self:
         """Collapse trials by grouping `obs` and aggregating data.
 
         Args:
@@ -373,7 +376,7 @@ class PhotometryData:
             layers[key] = X_lay
             obs_agg = obs_agg.join(obs_lay[data_cols], rsuffix='_' + str(key))
         
-        new_obj = PhotometryData.from_arrays(
+        new_obj = type(self).from_arrays(
             obs=obs_agg,
             data=X_agg,
             time_points=self.adata.var['t'],
@@ -418,7 +421,7 @@ class PhotometryData:
         freq: float | None = None,
         series: np.ndarray | None = None,
         event_cols: list[str] | None = None,
-        ) -> "PhotometryData":
+        ) -> Self:
         """Return a new `PhotometryData` object with windowed time series.
 
         Args:
@@ -457,7 +460,7 @@ class PhotometryData:
         if event_cols is not None:
             obs[event_cols] = obs[event_cols] - centers[:, None]
 
-        out: "PhotometryData" = PhotometryData.from_arrays(
+        out: Self = type(self).from_arrays(
             obs=obs,
             data=data,
             time_points=time_points,

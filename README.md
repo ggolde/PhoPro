@@ -3,7 +3,7 @@
 *A Python package for extendable and flexible processing and analysis of behavior-coupled fiber photometry experiments.*
 
 ## Overview
-This package provides extensive functionaly for processing, handling, and analyzing fiber photometry datasets while remaining highly extendable to specific use cases. The high level APIs only require basic programming experience. It is built around 4 main modules:
+This package provides extensive functionaly for processing, handling, analyzing, and bulk processing fiber photometry datasets while remaining highly extendable to specific use cases. The high level APIs only require basic programming experience. It is built around 4 main modules:
 
 * **[PhotometryLoader](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryLoader/)** - loaders for various photometry data formats.
 
@@ -11,9 +11,18 @@ This package provides extensive functionaly for processing, handling, and analyz
 
 * **[PhotometryData](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryData/)** - a class holding trial-wise signals and metadata with advanced filtering, averaging, windowing, and analysis functionality.
 
+* **[PhotometryPipeline](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryPipeline/)** - a class for easy, highly-customizable bulk processing of photometry data.
+
+
+With another module for simulating photometry data:
+
 * **[SimulatedPhotometryGenerator](https://ggolde.github.io/pyFiberPhotometry/api/SimulatedPhotometryGenerator/)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
 
-**Documentation can be found [here](https://ggolde.github.io/pyFiberPhotometry/).**
+---
+
+## [Documentation](https://ggolde.github.io/pyFiberPhotometry/)
+
+Documentation for this package can be found [here](https://ggolde.github.io/pyFiberPhotometry/). It is built with mkdocs-material and hosted on GitHub pages.
 
 ---
 
@@ -90,10 +99,12 @@ trials.write_h5ad('example.h5ad')
 ---
 
 ## Planned Features
-This package is in ongoing development, please suggest any features you would like to see implemented on the [issues page](https://github.com/ggolde/pyFiberPhotometry/issues). The
-- Implement import support for more formats.
-- More methods for artifact detection and correction.
-- Easier APIs for the cluster based permutation test and functional mixed modeling.
+This package is in ongoing development, please suggest any features you would like to see implemented on the [issues page](https://github.com/ggolde/pyFiberPhotometry/issues). Below are a few planned features:
+* [ ] Implement import support for more formats.
+* [ ] More methods for artifact detection and correction.
+* [ ] Easier APIs for the cluster based permutation test and functional mixed modeling.
+* [ ] Phase out "variants" modules.
+* [x] Pipeline class for easy bulk processing.
 
 ## License
 

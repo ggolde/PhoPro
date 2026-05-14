@@ -249,11 +249,9 @@ class ODS_Detector(ArtifactDetector):
                 artifact_intervals=artifacts.intervals,
             )
 
-            artifacts.df.drop(
-                artifacts.df['reference_cor'] < self.reference_cor_cutoff,
-                inplace=True,
-                axis=0,
-            )
+            artifacts.df = artifacts.df.loc[
+                artifacts.df['reference_cor'] >= self.reference_cor_cutoff
+            ]
         
         return artifacts
     

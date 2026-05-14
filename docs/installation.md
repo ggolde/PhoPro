@@ -31,8 +31,8 @@ The following tutorial is for adding support for the advanced analysis method [F
 1. Install all R packages avaliable from conda:
 ```
 conda activate photometry
-conda install -c r-base=4.4.3 r-essentials
-conda install -c conda-forge r-lme4=1.1_35.5 r-mass=7.3_64 r-mvtnorm=1.2_6 r-gridextra=2.3 r-rfast=2.1.0 r-matrix=1.7_2 r-arrangements r-here r-devtools
+conda install -c conda-forge r-base=4.4.3 r-essentials
+conda install -c conda-forge r-lme4=1.1_35.5 r-mass=7.3_64 r-mvtnorm=1.2_6 r-gridextra=2.3 r-rfast=2.1.0 r-matrix=1.7_2 r-arrangements r-here r-devtools r-rcurl
 ```
 
 2. Then run the install_FLMM.R script with your conda enviroment active.

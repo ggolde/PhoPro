@@ -1,14 +1,18 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Callable, Literal
 
 import numpy as np
 import pandas as pd
 import json
+import yaml
 import tdt
+import os
 
 from .PhotometryExperiment import PhotometryExperiment
 from ..utils.ops import downsample_1d
+
+AnnotationHandler = Callable[[str, "PhotometryLoader"], dict[str, Any]]
 
 class PhotometryLoader(ABC):
     """Abstract base class for photometry data loaders."""
@@ -22,6 +26,57 @@ class PhotometryLoader(ABC):
         """
         pass
 
+    def read_annotation(
+            self, 
+            file: str | None, 
+            handler: Literal['json', 'yaml'] | AnnotationHandler, 
+            parent_key: str | None = None
+            ) -> dict:
+        """Load experiment metadata from annotation file.
+        
+        Args:
+            file (str | None): path to annotation file.
+            handler (Literal['json', 'yaml'] | AnnotationHandler): a string
+                specifying how to read the annotation file or a custom
+                function that takes in the file path and loader object and
+                returns a dictionary.
+        
+        Returns:
+            Dict: containing the read in metadata.
+        """
+        # check input
+        if file is None:
+            return {}
+        elif not os.path.exists(file):
+            raise ValueError(f'Annotation file {file} does not exsit.')
+            
+        # use handler to load annotations
+        match handler:
+            case func if callable(func):
+                annots = handler(file, self)
+            case 'json':
+                with open(file, 'r') as f:
+                    annots = json.load(f)
+            case 'yaml':
+                with open(file, 'r') as f:
+                    annots = yaml.load(f, Loader=yaml.SafeLoader)
+            case _:
+                raise ValueError(f'Annotation handler {handler} not recognized!')
+            
+        # use parent key if specified
+        if parent_key is not None:
+            if parent_key not in annots:
+                raise ValueError(f'{parent_key} is not a key in the full annotation file.')
+            
+            annots = annots[parent_key]
+            
+        # validate handler output
+        if not isinstance(annots, dict):
+            raise ValueError(f'Loaded annotations are not a dictionary. It is type {type(annots)}')
+        
+        return annots
+
+
 class TDTLoader(PhotometryLoader):
     """Extract photometry data from TDT folder format."""
 
@@ -33,6 +88,8 @@ class TDTLoader(PhotometryLoader):
             signal_label: str,
             isosbestic_label: str,
             downsample: int = 10,
+            annotation_file: str | None = None,
+            annotation_handler: Literal['json', 'yaml'] | AnnotationHandler = 'json',
             ):
         """Initialize a TDT photometry loader.
 
@@ -44,6 +101,14 @@ class TDTLoader(PhotometryLoader):
             isosbestic_label (str): Base label for the isosbestic channel.
             downsample (int, optional): Downsampling factor for the raw
                 streams (mean pooling). Defaults to ``10``.
+            annotation_file (str, optional): JSON file within the TDT folder
+                that contains experiment metadata. For TDT, the annotations
+                should be a nested dictionary with the box prefix being the
+                first key.
+            annotation_handler (Literal['json', 'yaml'] | AnnotationHandler):
+                a string specifying how to read the annotation file or a
+                custom function that takes in the file path and loader object
+                and returns a dictionary.
 
         Returns:
             None
@@ -55,7 +120,10 @@ class TDTLoader(PhotometryLoader):
         self.event_labels = list(event_labels)
         self.downsample = downsample
 
-        self.metadata = {}
+        self.annotation_file = annotation_file
+        self.annotation_handler = annotation_handler
+
+        self.metadata = {'source' : str(self.data_folder), 'box' : str(self.box)}
 
     # --- loader method ---
     def load(self) -> PhotometryExperiment:
@@ -97,6 +165,12 @@ class TDTLoader(PhotometryLoader):
 
         events = self.extract_events(tdt_obj)
         del tdt_obj
+
+        # load annotations
+        if self.annotation_file is not None:
+            annotation_fpath = os.path.join(self.data_folder, self.annotation_file)
+            annots = self.read_annotation(file=annotation_fpath, handler=self.annotation_handler, parent_key=self.box)
+            self.metadata.update(annots)
 
         data = dict(
             raw_signal=raw_signal,
@@ -142,6 +216,8 @@ class CSVLoader(PhotometryLoader):
             isosbestic_col: str | None = 'isosbestic',
             events_json: str | None = None,
             downsample: int = 10,
+            annotation_file: str | None = None,
+            annotation_handler: Literal['json', 'yaml'] | AnnotationHandler = 'json',
             ) -> None:
         """Initialize a CSV photometry loader.
 
@@ -157,6 +233,14 @@ class CSVLoader(PhotometryLoader):
                 event labels to timestamps. Defaults to ``None``.
             downsample (int, optional): Downsampling factor applied to the CSV
                 series. Defaults to ``10``.
+            annotation_file (str, optional): JSON file within the TDT folder
+                that contains experiment metadata. For TDT, the annotations
+                should be a nested dictionary with the box prefix being the
+                first key.
+            annotation_handler (Literal['json', 'yaml'] | AnnotationHandler):
+                a string specifying how to read the annotation file or a
+                custom function that takes in the file path and loader object
+                and returns a dictionary.
 
         Returns:
             None
@@ -170,7 +254,10 @@ class CSVLoader(PhotometryLoader):
         self.events_json = events_json
         self.downsample = downsample
 
-        self.metadata = {}
+        self.annotation_file = annotation_file
+        self.annotation_handler = annotation_handler
+
+        self.metadata = {'source' : str(self.csv)}
 
     def extract_data(self) -> dict[str, Any]:
         """Load signal, time, and event data from CSV and JSON files.
@@ -181,9 +268,11 @@ class CSVLoader(PhotometryLoader):
                 metadata needed to construct a `PhotometryExperiment`.
         """
         # load events
-        with open(self.events_json, 'r') as f:
-            events: dict = json.load(f)
-        events = {str(event) : np.asarray(timestamps) for event, timestamps in events.items()}
+        if self.events_json is None:
+            events = {}
+        else:
+            with open(self.events_json, 'r') as f: events: dict = json.load(f)
+            events = {str(event) : np.asarray(timestamps) for event, timestamps in events.items()}
         
         # load csv
         df = pd.read_csv(self.csv)
@@ -202,6 +291,11 @@ class CSVLoader(PhotometryLoader):
             time = downsample_1d(df[self.time_col].to_numpy(), self.downsample)
         else: 
             time = None
+
+        # load annotations
+        if self.annotation_file is not None:
+            annots = self.read_annotation(file=self.annotation_file, handler=self.annotation_handler, parent_key=None)
+            self.metadata.update(annots)
         
         # package results
         data = dict(

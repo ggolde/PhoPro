@@ -16,6 +16,7 @@ if(length(new.packages)){
 
 if(!("fastFMM" %in% installed.packages()[,"Package"])){
   print("Installing fastFMM")
+  chooseCRANmirror(ind=75)
   install.packages("fastFMM", dependencies = TRUE)
 }else{
   print("fastFMM already installed!")

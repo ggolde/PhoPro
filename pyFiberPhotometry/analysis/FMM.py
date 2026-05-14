@@ -7,6 +7,7 @@ import pandas as pd
 def run_fastFMM(
         df: pd.DataFrame,
         formula: str,
+        factor_cols: dict[str, str | None] = {},
         parallel: bool = True,
         family: str = "gaussian",
         analytic: bool = True,
@@ -38,7 +39,12 @@ def run_fastFMM(
     simplified input and output structures
 
     Args:
+        df (pd.DataFrame): metadata and photometry timepoints to fit a FLMM to.
+            catagorical metadata should be factored and photometry timepoints
+            should be in the format ``prefix.timepoint#``.
         formula (str): Formula to use in the fastFMM model.
+        factor_cols (dict[str, str | None]): which columns to factor as keys and
+            their reference levels as values. Defaults to ``{}``.
         family (str, optional): Family to use in the fastFMM model.
             Defaults to `"gaussian"`.
         analytic (bool, optional): Whether to use analytic inference instead of
@@ -101,10 +107,17 @@ def run_fastFMM(
         
     """
     # lazy import fast-fmm-rpy2
+    from rpy2.robjects import r
     from rpy2.rinterface import NULL  # type: ignore
     from fast_fmm_rpy2.ingest import pass_pandas_to_r
     from fast_fmm_rpy2.fmm_run import fui
     from fast_fmm_rpy2.plot_fui import plot_fui
+
+    # set up function
+    def _factor_r_var(r_var: str, col: str, ref_lvl: str | None) -> None:
+        r(f'{r_var}[,"{col}"] = factor({r_var}[,"{col}"], ordered = "FALSE")')
+        if ref_lvl is not None:
+            r(f'{r_var}[,"{col}"] = relevel({r_var}[,"{col}"], ref = "{ref_lvl}")')
 
     # step 0: validate inputs
     # convert some None types to R NULL type
@@ -130,13 +143,15 @@ def run_fastFMM(
     if not formula_valid:
         raise ValueError(f'Formula ({formula}) does not begin with any potential signal prefixes ({potential_prefixes})')
     
-    # step 1: pass dataframe to R
-    pass_pandas_to_r(df, r_var_name='py_dat')
+    # step 1: pass dataframe to R and factor vars
+    pass_pandas_to_r(df, r_var_name='dat')
+    for col, ref_lvl in factor_cols.items():
+        _factor_r_var('dat', col, ref_lvl)
 
     # step 2: run fastFMM
     model = fui(
         csv_filepath=None,
-        r_var_name='py_dat',
+        r_var_name='dat',
         formula=formula,
         parallel=parallel,
         family=family,

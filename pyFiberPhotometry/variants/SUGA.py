@@ -126,7 +126,7 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         fit_using: Literal['OLS', 'IRLS', 'IRLS_no_intercept', 'OLS_no_intercept'] = 'IRLS',
         
         align_to: str = 'OC',
-        center_on: list[str] = ['OC'],
+        center_on: list[str] = ['CC'],
         trial_bounds: tuple[float, float] = (-100.0, 3000.0),
         baseline_bounds: tuple[float, float] = (-100, -10),
         event_tolerences: dict[str, tuple[float, float]] = {'CC':(-1000.0, 1000.0)},
@@ -163,9 +163,6 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         log.info(f"Starting Pipeline {self.id}...")
         
         # step 1: validate extraction
-        log.info("Validating extracted TDT data...")
-        if len(self.metadata['missing_events']) != 0:
-            log.warning(f"Requested events {self.metadata['missing_events']} are missing")
         if align_to not in self.events:
             raise ValueError(f'There are no {align_to} events present in data!')
 
@@ -215,7 +212,6 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
             reference_cor_cutoff: float = 0.7,
             expand_sec: tuple[float, float] = (1, 1),
             buffer_sec: float = 2,
-            ignore_first_n: int = 1000,
             norm_before: Literal['none', 'zscore'] = 'none',
             n_chunks: int = 100,
             detrend: bool = True,
@@ -223,10 +219,7 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         if self.signal is None or self.fitted_ref is None:
             raise ValueError("Run preprocess_signal() before detect_artifacts().")
 
-        if ignore_first_n < 0 or ignore_first_n >= self.signal.size:
-            raise ValueError(f"ignore_first_n must be between 0 and {self.signal.size - 1}")
-
-        sig = self.signal.copy()
+        sig = self.filt_sig.copy()
         ref = self.fitted_ref.copy()
 
         if detrend:
@@ -241,36 +234,20 @@ class SUGA_PhotometryExperiment(PhotometryExperiment):
         else:
             raise ValueError(f"norm_before '{norm_before}' not recognized.")
 
-        sig_view = sig[ignore_first_n:]
-        ref_view = ref[ignore_first_n:]
-        time_view = self.time[ignore_first_n:]
-
         detector = ODS_Detector(
             score_threshold=score_threshold,
             jump_score_threshold=jump_score_threshold,
-            reference_cor_cutoff=-np.inf,
+            reference_cor_cutoff=reference_cor_cutoff,
             expand_sec=expand_sec,
             buffer_sec=buffer_sec,
             n_chunks=n_chunks,
         )
 
         artifacts = detector.detect(
-            signal=sig_view,
-            reference=None,
-            time=time_view,
+            signal=sig,
+            reference=ref,
+            time=self.time,
         )
-
-        artifacts.df['reference_cor'] = detector._calc_artifact_correlation(
-            signal=sig_view,
-            reference=ref_view,
-            artifact_intervals=artifacts.intervals,
-        )
-        artifacts.df = (
-            artifacts.df
-            .loc[artifacts.df['reference_cor'] >= reference_cor_cutoff]
-            .reset_index(drop=True)
-        )
-        artifacts.df[['start_idx', 'stop_idx']] = artifacts.df[['start_idx', 'stop_idx']] + ignore_first_n
 
         self.artifacts = artifacts
         self.metadata.update({

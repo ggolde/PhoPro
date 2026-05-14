@@ -259,6 +259,7 @@ class PhotometryExperiment:
             r2_val = r2_val,
             coeffs = coeffs,
         )
+        self.filt_sig = filt_sig
         self.fitted_ref = fitted_ref
     
         # apply reference curve correction
