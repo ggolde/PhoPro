@@ -104,6 +104,8 @@ This package is in ongoing development, please suggest any features you would li
 * [ ] More methods for artifact detection and correction.
 * [ ] Easier APIs for the cluster based permutation test and functional mixed modeling.
 * [ ] Phase out "variants" modules.
+* [ ] Improve windowing in PhotometryData.
+* [x] Improve trial extraction windowing.
 * [x] Pipeline class for easy bulk processing.
 
 ## License

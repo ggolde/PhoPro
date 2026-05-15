@@ -395,6 +395,13 @@ class PhotometryPipeline:
                     logger.info(f'Running custom post trial extraction operation...')
                     post_trial_extraction_operation(exp)
 
+                # warn if any trial windows were invalid
+                if exp.metadata['invalid_windows'] is not None:
+                    logger.warning(
+                        f'Invalid trial windows at indexes {exp.metadata["invalid_windows"]} '
+                        f'have been dropped.'
+                    )
+
                 # assign uid if function provided
                 if id_builder is not None:
                     logger.info(f'Assiging experiment ID...')

@@ -17,6 +17,7 @@ from ..utils.ops import (
     neg_bi_exponential_5
 )
 from ..utils.stats import OLS_fit, IRLS_fit, fit_photobleaching
+from ..utils.window import create_windows_interp, create_windows_nearest, WindowResult
 
 class PhotometryExperiment:
     """Handle processing of raw photometry data."""
@@ -315,6 +316,8 @@ class PhotometryExperiment:
             trial_normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] | Callable = 'none',
             check_overlap: bool = True,
             time_error_threshold: float = 0.1,
+            window_alignment: Literal['nearest', 'interp'] = 'nearest',
+            invalid_window_policy: Literal['drop', 'error'] = 'drop',
             event_conflict_logic: Literal['first', 'last', 'mean'] = 'first',
             ) -> None:
         """Build trial-wise windows, normalize, and store trial data.
@@ -352,6 +355,20 @@ class PhotometryExperiment:
             time_error_threshold (float, optional): Maximum allowed mean timing
                 error. Defaults to ``0.1``.
 
+            window_alignment (Literal['nearest', 'interp'], optional):
+                Stategy for aligning trial times. In ``'nearest'`` mode, events times
+                are rounded to the nearest sampling times, giving a maximum
+                event alignment error of +/- 0.5/frequency. In ``'interp'`` mode,
+                signals are linearly interpolated to an exact event-centered time
+                grid, removing event alignment error but introduction signal
+                interpolation error. Use ``'nearest'`` if event times are already
+                locked to time sampling points.
+
+            invalid_window_policy (Literal['drop', 'error'], optional):
+                Policy for handling trials whose windows extend outside the signal
+                bounds. ``'drop'`` drops the invalid windows while ``'error'`` raises
+                an error if any invalid windows are present.
+
             event_conflict_logic (Literal['first', 'last', 'mean'], optional):
                 Logic for choosing center-on event timestamps if multiple of the
                 same event are present. Defaults to ``'first'``.
@@ -382,7 +399,7 @@ class PhotometryExperiment:
         if align_events.size == 0: raise ValueError(f"No '{align_to}' events found.")
         
         # annotate events based on tolerences
-        events_selected = self.annotate_intervals(
+        events_selected = self._annotate_intervals(
             align_to=align_to,
             series=self.time, 
             centers=align_events,
@@ -392,64 +409,56 @@ class PhotometryExperiment:
             )
         
         # find window centers using the selected events
-        trial_window_centers = self.find_window_centers(
+        trial_window_centers = self._find_window_centers(
             center_on=center_on, 
             align_on=align_to, 
             events=events_selected,
             check_overlap=check_overlap,
             )
-        baseline_window_centers = align_events
         
-        # construct trial and baseline windows
-        raw_trial_signals, trial_times, trial_events = self.create_windows(
+        # construct trial windows
+        trial_windows = self._create_windows(
             signal=self.signal,
             time=self.time,
             events=events_selected,
             centers=trial_window_centers,
-            bounds=trial_bounds
+            bounds=trial_bounds,
+            strategy=window_alignment,
         )
+
+        # do the same for baseline
         if calc_baselines:
-            baseline_signals, baseline_times, baseline_events = self.create_windows(
+            baseline_windows = self._create_windows(
                 signal=self.signal,
                 time=self.time,
                 events=events_selected,
-                centers=baseline_window_centers,
-                bounds=baseline_bounds
+                centers=align_events,
+                bounds=baseline_bounds,
+                strategy=window_alignment,
             )
         else:
-            baseline_signals, baseline_times, baseline_events = None, None, None
+            baseline_windows = WindowResult.empty()
+
+        # handle invalid windows
+        self._handle_invalid_windows(
+            trial_windows=trial_windows,
+            baseline_windows=baseline_windows,
+            policy=invalid_window_policy,
+        )
 
         # apply trial-wise normalization method
-        match trial_normalization:
-            case func if callable(func):
-                trial_signals = trial_normalization(raw_trial_signals, baseline_signals)
-            case 'zscore':
-                trial_signals = zscore_signal(raw_trial_signals, baseline_signals)
-            case 'zero':
-                trial_signals = center_signal(raw_trial_signals, baseline_signals)
-            case 'mad':
-                trial_signals = mad_norm_signal(raw_trial_signals, baseline_signals)
-            case 'amp':
-                trial_signals = amp_norm_signal(raw_trial_signals, baseline_signals)
-            case 'none':
-                trial_signals = raw_trial_signals.copy()
-            case _:
-                raise ValueError(f'{trial_normalization} trial-wise normalization method not recognized!')
-        
-        # reconstruct times for consistency
-        trial_time_points = reconstruct_time_points(trial_bounds, self.frequency)
-
-        if calc_baselines:
-            baseline_time_points = reconstruct_time_points(baseline_bounds, self.frequency)
-        else:
-            baseline_time_points = None
+        processed_trial_signals = self._apply_trial_normalization(
+            trial_normalization=trial_normalization, 
+            raw_trial_signals=trial_windows.signals, 
+            baseline_signals=baseline_windows.signals,
+        )
 
         # save trial data
-        self.raw_trial_signal = raw_trial_signals
+        self.raw_trial_signal = trial_windows.signals
         self.trial_data = PhotometryData.from_arrays(
-            obs=pd.DataFrame(trial_events),
-            data=trial_signals,
-            time_points=trial_time_points,
+            obs=pd.DataFrame(trial_windows.events),
+            data=processed_trial_signals,
+            time_points=trial_windows.time_grid,
             metadata=self.metadata.copy(),
         )
 
@@ -459,14 +468,14 @@ class PhotometryExperiment:
         # save baseline data if desired
         if calc_baselines:
             self.baseline_data = PhotometryData.from_arrays(
-                obs=pd.DataFrame(baseline_events),
-                data=baseline_signals,
-                time_points=baseline_time_points,
+                obs=pd.DataFrame(baseline_windows.events),
+                data=baseline_windows.signals,
+                time_points=baseline_windows.time_grid,
                 metadata=self.metadata.copy(),
             )
 
         # check error in times
-        time_err = trial_times.std(axis=0).mean()
+        time_err = trial_windows.times.std(axis=0).mean()
         if time_err > time_error_threshold:
             raise ValueError(f'Error in rounded times is too high: {time_err} > {time_error_threshold}')
 
@@ -637,8 +646,31 @@ class PhotometryExperiment:
         )
         return corrected
     
-    # --- extraction of trial-wise data ---
-    def find_interval_bounds(self, series: np.ndarray, centers: np.ndarray, bounds: tuple[int, int]) -> np.ndarray:
+    # --- trial extraction helpers ---
+    def _apply_trial_normalization(
+            self, 
+            trial_normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] | Callable, 
+            raw_trial_signals: np.ndarray, 
+            baseline_signals: np.ndarray,
+            ) -> np.ndarray:
+        match trial_normalization:
+            case func if callable(func):
+                trial_signals = trial_normalization(raw_trial_signals, baseline_signals)
+            case 'zscore':
+                trial_signals = zscore_signal(raw_trial_signals, baseline_signals)
+            case 'zero':
+                trial_signals = center_signal(raw_trial_signals, baseline_signals)
+            case 'mad':
+                trial_signals = mad_norm_signal(raw_trial_signals, baseline_signals)
+            case 'amp':
+                trial_signals = amp_norm_signal(raw_trial_signals, baseline_signals)
+            case 'none':
+                trial_signals = raw_trial_signals.copy()
+            case _:
+                raise ValueError(f'{trial_normalization} trial-wise normalization method not recognized!')
+        return trial_signals
+
+    def _find_interval_bounds(self, series: np.ndarray, centers: np.ndarray, bounds: tuple[int, int]) -> np.ndarray:
         """Compute index bounds for windows around specified centers.
 
         Args:
@@ -654,7 +686,7 @@ class PhotometryExperiment:
         right_idxs = np.searchsorted(series, centers + high, side='right')
         return np.c_[left_idxs, right_idxs]
     
-    def find_timestamp_in_intervals(
+    def _find_timestamp_in_intervals(
             self, 
             timestamps: np.ndarray, 
             time_intervals: np.ndarray, 
@@ -684,7 +716,7 @@ class PhotometryExperiment:
             case 'first':
                 out[in_interval] = timestamps[lo_idx[in_interval]]
             case 'last':
-                out[in_interval] = timestamps[hi_idx[in_interval]]
+                out[in_interval] = timestamps[hi_idx[in_interval] - 1]
             case 'mean':
                 counts = hi_idx - lo_idx
                 in_interval = counts > 0
@@ -697,7 +729,7 @@ class PhotometryExperiment:
                 raise ValueError(f'Multiple event selection logic, {logic}, is not recognized')
         return out
     
-    def annotate_intervals(
+    def _annotate_intervals(
             self, 
             align_to: str, 
             series: np.ndarray, 
@@ -721,50 +753,92 @@ class PhotometryExperiment:
         Returns:
             dict[str, np.ndarray]: Mapping from labels to aligned event times per trial.
         """
-        out = {}
-        out[align_to] = centers
+        out = {align_to: centers.copy()}
+        tmin, tmax = series[0], series[-1]
+
         for label, bounds in tolorences.items():
+            low, high = map(float, bounds)
+            if low > high:
+                raise ValueError(f"Invalid bounds for {label}: {bounds}")
+
             timestamps = events.get(label)
-            interval_bounds = self.find_interval_bounds(series=series, centers=centers, bounds=bounds)
-            time_intervals = series[interval_bounds]
-            out[label] = self.find_timestamp_in_intervals(timestamps=timestamps, time_intervals=time_intervals, logic=logic)
+            if timestamps is None:
+                out[label] = np.full(centers.shape, np.nan, dtype=float)
+                continue
+
+            timestamps = np.asarray(timestamps, dtype=float)
+            if timestamps.ndim != 1:
+                raise ValueError(f"Event timestamps for {label} must be 1D")
+
+            time_intervals = np.column_stack((centers + low, centers + high))
+            time_intervals[:, 0] = np.maximum(time_intervals[:, 0], tmin)
+            time_intervals[:, 1] = np.minimum(time_intervals[:, 1], tmax)
+
+            invalid = time_intervals[:, 0] > time_intervals[:, 1]
+            selected = np.full(centers.shape, np.nan, dtype=float)
+
+            if timestamps.size > 0 and np.any(~invalid):
+                selected[~invalid] = self._find_timestamp_in_intervals(
+                    timestamps=timestamps,
+                    time_intervals=time_intervals[~invalid],
+                    logic=logic,
+                )
+
+            out[label] = selected
         return out
+    
+    def _create_windows(
+            self,
+            signal: np.ndarray,
+            time: np.ndarray,
+            events: dict[str, np.ndarray],
+            centers: np.ndarray,
+            bounds: tuple[float, float],
+            strategy: Literal['nearest', 'interp'] = 'nearest',
+            ) -> WindowResult:
 
-    def create_windows(
-            self, 
-            signal: np.ndarray, 
-            time: np.ndarray, 
-            events: dict[str, np.ndarray], 
-            centers: np.ndarray, 
-            bounds: tuple[int, int]
-            ) -> tuple[np.ndarray, np.ndarray, dict]:
-        """Slice signal and time into fixed-length windows around centers.
+        # execute windowing
+        match strategy:
+            case 'nearest':
+                return create_windows_nearest(signal, time, events, centers, bounds, self.frequency)
+            case 'interp':
+                return create_windows_interp(signal, time, events, centers, bounds, self.frequency)
+            case _:
+                raise ValueError(f'Window alignment strategy {strategy} not recognized.')
+            
+    def _handle_invalid_windows(
+            self,
+            trial_windows: WindowResult,
+            baseline_windows: WindowResult,
+            policy: Literal['drop', 'error'] = 'drop'
+            ):
+        if baseline_windows.is_empty:
+            invalid_mask = trial_windows.invalid_mask
+        else:
+            invalid_mask = trial_windows.invalid_mask | baseline_windows.invalid_mask
 
-        Args:
-            signal (np.ndarray): Full preprocessed signal trace.
-            time (np.ndarray): Associated time vector.
-            events (dict[str, np.ndarray]): Per-label event times for each trial.
-            centers (np.ndarray): Window center times for each trial.
-            bounds (tuple[int, int]): Relative bounds [low, high] around centers.
+        if invalid_mask.any():
+            invalid_idxs = np.flatnonzero(invalid_mask).tolist()
+            self.metadata['invalid_windows'] = invalid_idxs
+            match policy:
+                case 'drop':
+                    trial_windows.apply_mask(~invalid_mask)
+                    baseline_windows.apply_mask(~invalid_mask)
+                case 'error':
+                    raise ValueError(f'Invalid trial windows that extend outside signal range at {invalid_idxs}')
+                case _:
+                    raise ValueError(f'Invalid window policy {policy} not recognized.')
+        else:
+            self.metadata['invalid_windows'] = None
+        
+        # confirm no invalid windows left
+        assert not trial_windows.invalid_mask.any()
 
-        Returns:
-            tuple[np.ndarray, np.ndarray, dict]: Signal windows, centered time windows, and centered events.
-        """
-        # find target window bounds
-        low, high = bounds
-        left_idxs = np.searchsorted(time, centers + low, side='left')
+        # confirm some trials remain
+        if trial_windows.signals.size == 0:
+            raise ValueError(f'No trials remain after dropping invalid windows.')
 
-        # calculate minimum window size to ensure stable sizes
-        target_len = np.floor((bounds[1] - bounds[0]) * self.frequency).astype(int)
-        window_idxs = left_idxs[:, None] + np.arange(target_len)[None, :]
-
-        # slice and stack + center time and events
-        signal_windows = signal[window_idxs]
-        time_windows = time[window_idxs] - centers[:, np.newaxis]
-        events_centered = {k : v - centers for k, v in events.items()}
-        return signal_windows, time_windows, events_centered
-
-    def find_window_centers(
+    def _find_window_centers(
             self, 
             center_on: str | list[str], 
             align_on: str, 
