@@ -253,14 +253,14 @@ class PhotometryPipeline:
     
     def run(
             self,
-            output_dir: str | Path | None,
 
             # args
             loader_kwargs: dict[str, Any] | list[dict[str, Any]],
             preprocess_kwargs: dict[str, Any],
             trial_extraction_kwargs: dict[str, Any],
 
-            # pipeline control
+            # I/O
+            output_dir: str | Path | None = None,
             log_file: str | None = None,
             trial_output_file: str | None = 'trials.h5ad',
 
@@ -369,7 +369,7 @@ class PhotometryPipeline:
         logger.info(f'Iterating over {n_jobs} jobs...\n')
         for i, job in enumerate(jobs):
             try:
-                logger.info(f'Processing job {job["input"]} ({i}/{n_jobs})')
+                logger.info(f'Processing job {job["input"]} ({i+1}/{n_jobs})')
 
                 # 1. load experiment
                 logger.info(f'Loading expriment...')
@@ -418,13 +418,13 @@ class PhotometryPipeline:
                 )
 
                 # clean up before next iteration
-                logger.info(f'Job {i} complete.\n')
+                logger.info(f'Job {i+1} complete.\n')
                 del exp
                 n_processed += 1
 
             # handle errors
             except Exception as e:
-                logger.error(f'Error processing {job["input"]}: \n\t {e}\n')
+                logger.error(f'Error processing {job["input"]}: \n\t {e}\n', exc_info=True)
                 n_errors += 1
 
         # --- finalize ---
