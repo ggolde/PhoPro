@@ -453,6 +453,10 @@ class PhotometryExperiment:
             metadata=self.metadata.copy(),
         )
 
+        # assign trial numbers
+        self.trial_data.obs.insert(0, 'trial_num', np.arange(self.trial_data.n_trials, dtype=int) + 1)
+
+        # save baseline data if desired
         if calc_baselines:
             self.baseline_data = PhotometryData.from_arrays(
                 obs=pd.DataFrame(baseline_events),
