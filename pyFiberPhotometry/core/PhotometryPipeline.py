@@ -395,17 +395,17 @@ class PhotometryPipeline:
                     logger.info(f'Running custom post trial extraction operation...')
                     post_trial_extraction_operation(exp)
 
-                # pass down specified metadata
-                if passdown_metadata is not None:
-                    logger.info(f'Passing down experiment metadata as columns...')
-                    exp.trial_data.add_obs_columns(add_from=exp.metadata, keys=passdown_metadata)
-
                 # assign uid if function provided
                 if id_builder is not None:
                     logger.info(f'Assiging experiment ID...')
                     exp.id = id_builder(exp)
-                    exp.trial_data.obs['uid'] = exp.id
+                    exp.trial_data.obs['experiment_id'] = exp.id
                     logger.info(f'Expriment ID = {str(exp.id)}')
+
+                # pass down specified metadata
+                if passdown_metadata is not None:
+                    logger.info(f'Passing down experiment metadata as columns...')
+                    exp.trial_data.add_obs_columns(add_from=exp.metadata, keys=passdown_metadata)
 
                 # accumulate object
                 logger.info(f'Accumulating result...')

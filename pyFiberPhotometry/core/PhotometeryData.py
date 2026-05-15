@@ -526,7 +526,7 @@ class PhotometryData:
         """
         return cast(np.ndarray, self.adata.layers[key])
 
-    def filter_rows(self, mask: np.ndarray, inplace: bool = False) -> "None | PhotometryData":
+    def filter_rows(self, mask: np.ndarray, inplace: bool = False) -> None | Self:
         """Filter rows (trials) using a boolean mask.
 
         Args:
@@ -541,7 +541,7 @@ class PhotometryData:
         if inplace:
             self.adata = self.adata[mask, :].copy()
         else:
-            return PhotometryData(self.adata[mask, :].copy())
+            return type(self)(self.adata[mask, :].copy())
 
     def add_obs_columns(self, add_from: dict[str, Any], keys: list[str] | None = None) -> None:
         """Add columns to `obs` from a dictionary.
@@ -556,7 +556,7 @@ class PhotometryData:
         """
         keys = list(add_from.keys()) if keys is None else keys
         for k in keys:
-            self.adata.obs[k] = add_from[k]
+            self.adata.obs[k] = add_from.get(k, None)
 
     def add_metadata(self, add_from: dict[str, Any], keys: list[str] | None = None) -> None:
         """Add entries to the `.uns` metadata dictionary.
@@ -571,7 +571,7 @@ class PhotometryData:
         """
         keys = list(add_from.keys()) if keys is None else keys
         for k in keys:
-            self.adata.uns[k] = add_from[k]
+            self.adata.uns[k] = add_from.get(k, None)
 
     def drop_obs_columns(self, to_drop: list[str]) -> None:
         """Drop observation columns from `obs`.
@@ -602,7 +602,6 @@ class PhotometryData:
             err_layer: str | None = None,
             obs_cols: list[str] | None = None, 
             downsample: int | None = 10,
-
             ) -> pd.DataFrame:
         """Translate trial data to long DataFrame format.
 
