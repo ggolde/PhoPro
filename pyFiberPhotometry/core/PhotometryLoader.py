@@ -17,13 +17,21 @@ AnnotationHandler = Callable[[str, "PhotometryLoader"], dict[str, Any]]
 class PhotometryLoader(ABC):
     """Abstract base class for photometry data loaders."""
 
-    @abstractmethod
-    def load(self) -> PhotometryExperiment:
+    def load(self, exp_cls: type[PhotometryExperiment] = PhotometryExperiment) -> PhotometryExperiment:
         """Load data and return a `PhotometryExperiment` instance.
+
+        Args:
+            exp_cls (type[PhotometryExperiment]): Subclass of 
+            PhotometryExperiment to use.
 
         Returns:
             PhotometryExperiment: Loaded experiment object.
         """
+        data = self.extract_data()
+        return exp_cls(**data)
+    
+    @abstractmethod
+    def extract_data(self) -> dict[str, Any]:
         pass
 
     def read_annotation(
@@ -76,7 +84,6 @@ class PhotometryLoader(ABC):
         
         return annots
 
-
 class TDTLoader(PhotometryLoader):
     """Extract photometry data from TDT folder format."""
 
@@ -87,7 +94,7 @@ class TDTLoader(PhotometryLoader):
             event_labels: list[str],
             signal_label: str,
             isosbestic_label: str,
-            downsample: int = 10,
+            downsample: int | None = None,
             annotation_file: str | None = None,
             annotation_handler: Literal['json', 'yaml'] | AnnotationHandler = 'json',
             ):
@@ -99,8 +106,9 @@ class TDTLoader(PhotometryLoader):
             event_labels (list[str]): Event labels to extract from epocs.
             signal_label (str): Base label for the signal channel.
             isosbestic_label (str): Base label for the isosbestic channel.
-            downsample (int, optional): Downsampling factor for the raw
-                streams (mean pooling). Defaults to ``10``.
+            downsample (int | None, optional): Downsampling factor for the raw
+                streams (mean pooling). If None, no downsampling is performed.
+                Defaults to ``None``.
             annotation_file (str, optional): JSON file within the TDT folder
                 that contains experiment metadata. For TDT, the annotations
                 should be a nested dictionary with the box prefix being the
@@ -118,24 +126,12 @@ class TDTLoader(PhotometryLoader):
         self.signal_label = signal_label
         self.isosbestic_label = isosbestic_label
         self.event_labels = list(event_labels)
-        self.downsample = downsample
+        self.downsample = 1 if downsample is None else downsample
 
         self.annotation_file = annotation_file
         self.annotation_handler = annotation_handler
 
         self.metadata = {'source' : str(self.data_folder), 'box' : str(self.box)}
-
-    # --- loader method ---
-    def load(self) -> PhotometryExperiment:
-        """Load TDT data and return a `PhotometryExperiment` instance.
-
-        Returns:
-            PhotometryExperiment: Loaded experiment object.
-        """
-        data = self.extract_data()
-        obj = PhotometryExperiment(**data)
-        return obj 
-
 
     # --- data extraction ---
     def extract_data(self) -> dict[str, Any]:
@@ -149,7 +145,7 @@ class TDTLoader(PhotometryLoader):
                 isosbestic signal, time vector, frequency, events, and
                 metadata needed to construct a `PhotometryExperiment`.
         """
-        tdt_obj = tdt.read_block(self.data_folder)
+        tdt_obj = tdt.read_block(self.data_folder, verbose=False)
 
         # rip data out of TDT object
         sig = tdt_obj.streams[self.signal_label + self.box].data
@@ -214,8 +210,8 @@ class CSVLoader(PhotometryLoader):
             time_col: str = 'time',
             signal_col: str = 'signal',
             isosbestic_col: str | None = 'isosbestic',
-            events_json: str | None = None,
-            downsample: int = 10,
+            event_cols: str | list[str] | None = None,
+            downsample: int | None = None,
             annotation_file: str | None = None,
             annotation_handler: Literal['json', 'yaml'] | AnnotationHandler = 'json',
             ) -> None:
@@ -229,10 +225,11 @@ class CSVLoader(PhotometryLoader):
                 values. Defaults to ``'signal'``.
             isosbestic_col (str | None, optional): Column name containing the
                 isosbestic values. Defaults to ``'isosbestic'``.
-            events_json (str | None, optional): Path to a JSON file mapping
-                event labels to timestamps. Defaults to ``None``.
-            downsample (int, optional): Downsampling factor applied to the CSV
-                series. Defaults to ``10``.
+            event_cols (str | list[str] | None, optional): Column names containing
+                an binary indication that the event is present at that timepoint
+            downsample (int | None, optional): Downsampling factor for the raw
+                streams (mean pooling). If None, no downsampling is performed.
+                Defaults to ``None``.
             annotation_file (str, optional): JSON file within the TDT folder
                 that contains experiment metadata. For TDT, the annotations
                 should be a nested dictionary with the box prefix being the
@@ -251,8 +248,11 @@ class CSVLoader(PhotometryLoader):
         self.sig_col = signal_col
         self.iso_col = isosbestic_col
         
-        self.events_json = events_json
-        self.downsample = downsample
+        if isinstance(event_cols, str):
+            event_cols = [event_cols]
+        self.event_cols = event_cols
+
+        self.downsample = 1 if downsample is None else downsample
 
         self.annotation_file = annotation_file
         self.annotation_handler = annotation_handler
@@ -266,32 +266,37 @@ class CSVLoader(PhotometryLoader):
             dict[str, Any]: Dictionary containing the raw signal,
                 isosbestic signal, time vector, frequency, events, and
                 metadata needed to construct a `PhotometryExperiment`.
-        """
-        # load events
-        if self.events_json is None:
-            events = {}
-        else:
-            with open(self.events_json, 'r') as f: events: dict = json.load(f)
-            events = {str(event) : np.asarray(timestamps) for event, timestamps in events.items()}
-        
+        """        
         # load csv
         df = pd.read_csv(self.csv)
 
+        # load required
         if self.sig_col in df:
             raw_signal = downsample_1d(df[self.sig_col].to_numpy(), self.downsample)
         else:
             raise ValueError(f"Column for signal timepoints ({self.sig_col}) is not in {self.csv}")
         
+        if self.time_col in df: 
+            time = downsample_1d(df[self.time_col].to_numpy(), self.downsample)
+        else: 
+            raise KeyError(f"Column for timepoints ({self.time_col}) not found in CSV.")
+        
+        # load optional
         if self.iso_col in df: 
             raw_isosbestic = downsample_1d(df[self.iso_col].to_numpy(), self.downsample)
         else: 
             raw_isosbestic = None
 
-        if self.time_col in df: 
-            time = downsample_1d(df[self.time_col].to_numpy(), self.downsample)
-        else: 
-            time = None
-
+        events = {}
+        if self.event_cols is not None:
+            missing = [col for col in self.event_cols if col not in df.columns]
+            if missing:
+                raise KeyError(f"Event columns ({missing}) not found in CSV.")
+            
+            for col in self.event_cols:
+                present = df[col].fillna(False).astype(bool).to_numpy()
+                events[col] = np.asarray(time[present], dtype=float)
+            
         # load annotations
         if self.annotation_file is not None:
             annots = self.read_annotation(file=self.annotation_file, handler=self.annotation_handler, parent_key=None)
@@ -307,12 +312,3 @@ class CSVLoader(PhotometryLoader):
             metadata = self.metadata,
         )
         return data
-    
-    def load(self) -> PhotometryExperiment:
-        """Load CSV-based data and return a `PhotometryExperiment` instance.
-
-        Returns:
-            PhotometryExperiment: Loaded experiment object.
-        """
-        data = self.extract_data()
-        return PhotometryExperiment(**data)

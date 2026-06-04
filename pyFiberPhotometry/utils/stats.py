@@ -85,6 +85,25 @@ def mad_std(x):
     med = np.median(x)
     return 1.4826 * np.median(np.abs(x - med))
 
+def positive_robust_scale(residuals: np.ndarray, signal: np.ndarray) -> float:
+    scale = mad_std(residuals)
+
+    if np.isfinite(scale) and scale > 0:
+        return float(scale)
+
+    scale = np.nanstd(residuals)
+    if np.isfinite(scale) and scale > 0:
+        return float(scale)
+
+    signal_scale = max(
+        np.nanstd(signal),
+        np.ptp(signal),
+        np.nanmax(np.abs(signal)),
+        1.0,
+    )
+
+    return float(signal_scale * 1e-6)
+
 def fit_photobleaching(
         signal: np.ndarray,
         time: np.ndarray,
@@ -107,7 +126,7 @@ def fit_photobleaching(
     # rough LOWESS baseline
     bleach0 = lowess(sig_reduced, time_reduced, frac=0.05, it=3, return_sorted=False)
     # robust residual scale
-    sigma0 = mad_std(sig_reduced - bleach0)
+    sigma0 = positive_robust_scale(sig_reduced - bleach0, sig_reduced)
 
     # construct bounds
     T = time.max() - time.min()

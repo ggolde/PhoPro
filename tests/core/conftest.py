@@ -1,41 +1,16 @@
 import numpy as np
 import pandas as pd
+import pathlib
 import pytest
 
 from pyFiberPhotometry.core.PhotometryExperiment import PhotometryExperiment
 from pyFiberPhotometry.core.PhotometeryData import PhotometryData
+from pyFiberPhotometry.core.PhotometryLoader import PhotometryLoader
+from pyFiberPhotometry.core.PhotometryPipeline import PhotometryPipeline
 from pyFiberPhotometry.utils.sim import SimulatedPhotometryGenerator
 
-# set up dummy experiment tester subclass
-class DummyExperiment(PhotometryExperiment):
-    def run_pipeline(self) -> None:
-        self.preprocess_signal(
-            cutoff_frequency=3.0,
-            order=4,
-            correction_method="dF/F",
-            signal_normalization="none",
-            fit_using="IRLS",
-            maxiter=200,
-            c=3,
-        )
-        self.extract_trial_data(
-            align_to="event",
-            center_on=["choice_left", "choice_right"],
-            trial_bounds=(-2.0, 4.0),
-            baseline_bounds=(-2.0, 0.0),
-            event_tolerences={
-                "choice_left": (0.0, 1.0),
-                "choice_right": (0.0, 1.0),
-            },
-            trial_normalization="none",
-            check_overlap=True,
-            time_error_threshold=0.2,
-            event_conflict_logic="first",
-        )
-
-
-@pytest.fixture
-def sim():
+# simulated data
+def simulate_data() -> SimulatedPhotometryGenerator:
     sim = SimulatedPhotometryGenerator(
         T_sec=120,
         fs=20.0,
@@ -54,6 +29,56 @@ def sim():
     )
     return sim
 
+# set up dummy experiment tester subclass
+class DummyExperiment(PhotometryExperiment):
+    def run_pipeline(self) -> None:
+        self.preprocess_signal(
+            cutoff_frequency=3.0,
+            order=4,
+            correction_method="dF/F",
+            signal_normalization="none",
+            fit_using="IRLS",
+            maxiter=200,
+            c=3,
+        )
+        self.extract_trial_data(
+            align_to="event",
+            center_on=["choice_left", "choice_right"],
+            trial_bounds=(-2.0, 4.0),
+            baseline_bounds=(-2.0, 0.0),
+            trial_normalization="none",
+            check_overlap=True,
+            time_error_threshold=0.2,
+            event_conflict_logic="first",
+        )
+
+# dummy loader class for pipeline tests
+class DummyLoader(PhotometryLoader):
+    def __init__(
+            self,
+            file: str,
+            ) -> None:
+        self.file = file
+        self.metadata = {'key1': 'value1'}
+        return
+    
+    def extract_data(self) -> dict:
+        exp = simulate_data()
+        self.metadata['source'] = self.file
+        data = dict(
+            raw_signal = exp.F_exp,
+            raw_isosbestic = exp.F_iso,
+            time = exp.t,
+            frequency = None,
+            events = exp.events,
+            metadata = self.metadata,
+        )
+        return data
+
+@pytest.fixture
+def sim():
+    return simulate_data()
+
 
 @pytest.fixture
 def experiment(sim):
@@ -63,6 +88,18 @@ def experiment(sim):
         time=sim.t,
         frequency=sim.fs,
         events=sim.events,
+        metadata={'source':'simulated_test'}
+    )
+
+
+@pytest.fixture
+def single_channel_experiment(sim):
+    return PhotometryExperiment(
+        raw_signal=sim.F_exp,
+        raw_isosbestic=None,
+        time=sim.t,
+        frequency=sim.fs,
+        events=sim.events.copy(),
         metadata={'source':'simulated_test'}
     )
 
@@ -90,3 +127,17 @@ def photometry_data():
         layers=layers,
         metadata=metadata,
     )
+
+@pytest.fixture
+def dummy_pipeline():
+    test_dir = pathlib.Path(__file__).parent.parent.resolve()
+    target_dir = test_dir / 'test_data/dummy_pipeline'
+    pipeline = PhotometryPipeline(
+        data_directory=target_dir,
+        target_type='file',
+        recursive=False,
+        pattern='dummy_file*.csv',
+        loader_cls=DummyLoader,
+    )
+
+    return pipeline

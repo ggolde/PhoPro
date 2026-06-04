@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 import os
 
-from ..utils.ops import downsample_ndarray, downsample_1d, reconstruct_time_points
+from ..utils.ops import downsample_ndarray, downsample_1d
+from ..utils.window import create_windows_interp_2D, create_windows_nearest_2D
 
 ad.settings.allow_write_nullable_strings = True
 
@@ -318,19 +319,31 @@ class PhotometryData:
         if not isinstance(to_append, list):
             to_append = [to_append]
 
-        adatas = [getattr(self, 'adata')] + [getattr(obj, 'adata') for obj in to_append]
-        for i in range(len(adatas)):
-            adatas[i].obs = adatas[i].obs.infer_objects()
+        adatas = [self.adata.copy()] + [obj.adata.copy() for obj in to_append]
+
+        offset = 0
+        for adata in adatas:
+            adata.obs = adata.obs.infer_objects()
+            adata.obs_names = pd.Index(
+                np.arange(offset, offset + adata.n_obs, dtype=int).astype(str)
+            )
+            adata.var_names = adata.var_names.astype(str)
+            offset += adata.n_obs
 
         merged_adata = ad.concat(
             adatas=adatas,
-            axis='obs',
+            axis="obs",
             join=join,
             merge=merge,
             uns_merge=uns_merge,
-            index_unique=''
+            index_unique=None,
         )
-        merged_adata.obs.reset_index(drop=True, inplace=True) # type: ignore
+
+        # convert to string index
+        merged_adata.obs_names = pd.Index(
+            np.arange(merged_adata.n_obs, dtype=int).astype(str)
+        )
+
         if inplace:
             self.adata = merged_adata
             return
@@ -384,89 +397,106 @@ class PhotometryData:
             metadata=self.adata.uns
         )
         return new_obj
-    
-    def _get_window_idxs(
-            self, 
-            series: np.ndarray, 
-            centers: np.ndarray, 
-            bounds: tuple[int, int], 
-            freq: float
-            ) -> np.ndarray:
-        """Get indexes for windows centered around ``centers``.
-
-        Args:
-            series (np.ndarray): Time-like sorted series that windows will be
-                calculated in.
-            centers (np.ndarray): Specified window centers in the same units as
-                ``series``.
-            bounds (tuple[int, int]): Lower and upper bounds of the windows.
-            freq (float): The frequency of ``series``.
-
-        Returns:
-            np.ndarray: Two-dimensional array of window indexes.
-        """
-        low, high = bounds
-        left_idxs = np.searchsorted(series, centers + low, side='left')
-
-        # calculate minimum window size to ensure stable sizes
-        target_len = np.floor((bounds[1] - bounds[0]) * freq).astype(int)
-        window_idxs = left_idxs[:, None] + np.arange(target_len)[None, :]
-        window_idxs = np.clip(window_idxs, a_min=0, a_max=self.n_times - 1)
-        return window_idxs
 
     def window(
         self,
-        centers: np.ndarray | float,
+        centers: np.ndarray | float | str,
         bounds: tuple[float, float],
-        freq: float | None = None,
-        series: np.ndarray | None = None,
         event_cols: list[str] | None = None,
+        strategy: Literal['interp', 'nearest'] = 'nearest',
+        invalid_window_policy: Literal['drop', 'error'] = 'error',
+        verbose: bool = False,
         ) -> Self:
         """Return a new `PhotometryData` object with windowed time series.
 
         Args:
-            centers (np.ndarray | float): Specified centers of the
-                windows.
+            centers (np.ndarray | float | str): Specified centers of the
+                windows. Can be an array of length n_trials, a scalar, or
+                a numeric column in ``self.obs``.
             bounds (tuple[float, float]): Lower and upper bounds of the
                 windows relative to centers.
-            freq (float | None, optional): Frequency of ``series``. If
-                ``None``, ``self.freq`` is used. Defaults to ``None``.
-            series (np.ndarray | None, optional): Time-like sorted series that
-                windows will be calculated in. If ``None``, ``self.ts`` is
-                used. Defaults to ``None``.
-            event_cols (list[str] | None, optional): Columns of ``self.adata.obs``
+            event_cols (list[str] | None): Columns of ``self.adata.obs``
                 to re-center to ``centers``. Defaults to ``None``.
+            strategy (Literal['interp', 'nearest']): Stategy for aligning trial 
+                windows. In ``'nearest'`` mode, events times are rounded to the 
+                nearest sampling times, giving a maximum event alignment error of 
+                +/- 0.5/frequency. In ``'interp'`` mode, signals are linearly 
+                interpolated to an exact time grid.
+            invalid_window_policy (Literal['drop', 'error']):
+                Policy for handling windows that extend outside the signal
+                bounds. ``'drop'`` drops the invalid windows while ``'error'`` raises
+                an error if any invalid windows are present.
 
         Returns:
             PhotometryData: Windowed photometry data object.
         """
+        # coerce centers input
         if isinstance(centers, (float, int)): 
             centers = np.full(shape=self.X.shape[0], fill_value=centers, dtype=float)
 
-        series = self.ts if series is None else np.asarray(series)
-        freq = self.freq if freq is None else float(freq)
-        centers = np.asarray(centers)
+        elif isinstance(centers, str):
+            if centers not in self.obs: raise ValueError(f"Centers {centers} not a column in self.obs.")
+            centers = self.obs[centers].to_numpy().astype(float)
 
-        window_idxs = self._get_window_idxs(series=series, centers=centers, bounds=bounds, freq=freq)
-        row_slice = np.arange(self.X.shape[0])[:, None]
+        centers = np.asarray(centers, dtype=float)
 
-        data = self.X[row_slice, window_idxs]
-        layers = {}
-        for k, layer in self.adata.layers.items():
-            layers[k] = layer[row_slice, window_idxs]
+        # convert layers and events
+        layers = {key: self.get_layer(key).copy() for key in self.adata.layers.keys()}
+        events = None if event_cols is None else {col: self.obs[col].to_numpy() for col in event_cols}
 
-        time_points = reconstruct_time_points(bounds=bounds, freq=freq)
-        obs = self.adata.obs.copy()
+        # execute windowing
+        match strategy:
+            case 'nearest':
+                windows = create_windows_nearest_2D(
+                    signal=self.X,
+                    time=self.ts,
+                    centers=centers,
+                    bounds=bounds,
+                    freq=self.freq,
+                    events=events,
+                    layers=layers,
+                )
+            case 'interp':
+                windows = create_windows_interp_2D(
+                    signal=self.X,
+                    time=self.ts,
+                    centers=centers,
+                    bounds=bounds,
+                    freq=self.freq,
+                    events=events,
+                    layers=layers,
+                )
+            case _:
+                raise ValueError(f'Window strategy {strategy} not recognized.')
+        
+        # create new obs
+        new_obs = self.obs.copy()
         if event_cols is not None:
-            obs[event_cols] = obs[event_cols] - centers[:, None]
+            new_obs = new_obs.assign(**windows.events)
 
-        out: Self = type(self).from_arrays(
-            obs=obs,
-            data=data,
-            time_points=time_points,
-            layers=layers,
-            metadata=self.adata.uns,
+        # handle invalid windows
+        if windows.invalid_mask.any():
+            invalid_idxs = np.flatnonzero(windows.invalid_mask).tolist()
+            keep_mask = ~windows.invalid_mask
+
+            if invalid_window_policy == 'error':
+                raise ValueError(f'Invalid trial windows that extend outside of time range at {invalid_idxs}.')
+        
+            elif invalid_window_policy == 'drop':
+                # importantly apply mask to windows AND new obs
+                new_obs = new_obs.loc[keep_mask, :]
+                windows.apply_mask(keep_mask)
+                if verbose: print(f'Dropped trials at indexes {invalid_idxs} with invalid windows.')
+        
+        # package result
+        out = type(self).from_arrays(
+            obs=new_obs,
+            data=windows.signals,
+            time_points=windows.time_grid,
+            layers=windows.layers,
+            metadata=self.uns.copy(),
         )
+        
         return out
     
     def area_under_curve(
@@ -487,7 +517,7 @@ class PhotometryData:
                 windows relative to centers. If ``None`` the area under the
                 whole curve is calculated. Default is ``None``.
             transformation (Callable | None): If not ``None``, a transformation
-                to apply to the singal before taking the area. Shoule always
+                to apply to the singal before taking the area. Should always
                 return an array of the same shape and size. Default is ``None``.
 
         Returns

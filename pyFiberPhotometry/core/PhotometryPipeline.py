@@ -183,7 +183,7 @@ class PhotometryPipeline:
     # --- pipeline helpers ---
     def _load_experiment(self, path: Path, loader_kwargs: dict[str, Any]) -> type[PhotometryExperiment]:
         loader = self.loader_cls(path, **loader_kwargs)
-        exp: type[PhotometryExperiment] = loader.load()
+        exp: type[PhotometryExperiment] = loader.load(exp_cls=self.experiment_cls)
         return exp
     
     def _run_preprocessing(self, exp: type[PhotometryExperiment], preprocess_kwargs: dict[str, Any]) -> None:
@@ -343,7 +343,7 @@ class PhotometryPipeline:
         logger.info('Validating inputs...')
         self._validate_output_dir(output_dir)
         self._validate_low_memory_mode(low_memory_mode, trial_output_path)
-        self._validate_all_kwargs(loader_kwargs, preprocess_kwargs, trial_extraction_kwargs,)
+        self._validate_all_kwargs(loader_kwargs, preprocess_kwargs, trial_extraction_kwargs)
 
         # --- construct jobs ---
         logger.info('Discovering inputs...')
@@ -376,7 +376,7 @@ class PhotometryPipeline:
                 exp = self._load_experiment(job['input'], job['loader_kwargs'])
 
                 if post_load_operation is not None:
-                    logger.info(f'Running custom post loading operation...')
+                    logger.info(f'Running custom post-loading operation...')
                     post_load_operation(exp)
 
                 # 2. run preprocess
@@ -384,7 +384,7 @@ class PhotometryPipeline:
                 self._run_preprocessing(exp, job['preprocess_kwargs'])
 
                 if post_preprocess_operation is not None:
-                    logger.info(f'Running custom post preprocessing operation...')
+                    logger.info(f'Running custom post-preprocessing operation...')
                     post_preprocess_operation(exp)
                 
                 # 3. run extract trial data
@@ -392,7 +392,7 @@ class PhotometryPipeline:
                 self._run_trial_extraction(exp, job['trial_extraction_kwargs'])
 
                 if post_trial_extraction_operation is not None:
-                    logger.info(f'Running custom post trial extraction operation...')
+                    logger.info(f'Running custom post-trial extraction operation...')
                     post_trial_extraction_operation(exp)
 
                 # warn if any trial windows were invalid

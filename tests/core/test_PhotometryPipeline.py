@@ -1,0 +1,87 @@
+import numpy as np
+import pytest
+
+from pyFiberPhotometry.core.PhotometryExperiment import PhotometryExperiment
+
+# --- component tests ---
+def test_pipeline_identifies_correct_input_data(dummy_pipeline):
+    expected = ['dummy_file1.csv', 'dummy_file2.csv', 'dummy_file3.csv']
+    discovered_paths = dummy_pipeline.discover_inputs()
+    discovered_files = [str(path.name) for path in discovered_paths]
+
+    assert all(f in expected for f in discovered_files)
+    assert len(expected) == len(discovered_files)
+    
+def test_pipeline_constructs_jobs_correctly(dummy_pipeline):
+    inputs = dummy_pipeline.discover_inputs()
+    one_loader_jobs = dummy_pipeline._build_jobs(inputs, {}, {}, {})
+    two_loader_jobs = dummy_pipeline._build_jobs(inputs, [{}, {}], {}, {})
+
+    assert len(one_loader_jobs) == len(inputs)
+    assert len(two_loader_jobs) == 2*len(inputs)
+
+# --- workflow tests ---
+def test_pipeline_full_run(dummy_pipeline):
+
+    # pipeline functions
+    def id_builder(exp: PhotometryExperiment) -> str:
+        source = exp.metadata.get('source', 'UNKNOWN/UNKNOWN.ext')
+        uid = str(source).split('/')[-1].split('.')[0]
+        return uid
+    
+    def post_load_operation(exp: PhotometryExperiment) -> None:
+        exp.metadata['post_load_operation'] = 'success'
+
+    def post_preprocess_operation(exp: PhotometryExperiment) -> None:
+        exp.metadata['post_preprocess_operation'] = 'success'
+
+    def post_extraction_operation(exp: PhotometryExperiment) -> None:
+        exp.metadata['post_extraction_operation'] = 'success'
+        exp.trial_data.obs['act_directly_on_trials'] = 'success'
+
+    # vars
+    inputs = dummy_pipeline.discover_inputs()
+
+    passdown_metadata = [
+        'source', 'key1', 'post_load_operation',
+        'post_preprocess_operation', 'post_extraction_operation',
+        ]
+
+    data = dummy_pipeline.run(
+        loader_kwargs={},
+        preprocess_kwargs=dict(
+            cutoff_frequency=3.0,
+            order=4,
+            correction_method="dF/F",
+            signal_normalization="none",
+            fit_using="IRLS",
+            maxiter=200,
+            c=3,
+        ),
+        trial_extraction_kwargs=dict(
+            align_to="event",
+            center_on=["choice_left", "choice_right"],
+            trial_bounds=(-2.0, 4.0),
+            baseline_bounds=(-2.0, 0.0),
+            trial_normalization="none",
+            check_overlap=True,
+            time_error_threshold=0.2,
+            event_conflict_logic="first",
+        ),
+        passdown_metadata=passdown_metadata,
+        id_builder=id_builder,
+        post_load_operation=post_load_operation,
+        post_preprocess_operation=post_preprocess_operation,
+        post_trial_extraction_operation=post_extraction_operation,
+    )
+
+    # validate
+    missing_cols = [col for col in passdown_metadata if col not in data.obs]
+
+    assert missing_cols == []
+    assert (data.obs['key1'] == 'value1').all()
+    assert (data.obs['post_load_operation'] == 'success').all()
+    assert (data.obs['post_preprocess_operation'] == 'success').all()
+    assert (data.obs['post_extraction_operation'] == 'success').all()
+    assert (data.obs['act_directly_on_trials'] == 'success').all()
+    assert (int(data.obs['experiment_id'].nunique()) == len(inputs))

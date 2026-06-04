@@ -1,4 +1,6 @@
 from __future__ import annotations
+from collections.abc import Sequence
+from numbers import Real
 from typing import Any, Literal, Callable
 from scipy.signal import butter, sosfiltfilt
 from sklearn.metrics import r2_score, mean_squared_error
@@ -17,7 +19,7 @@ from ..utils.ops import (
     neg_bi_exponential_5
 )
 from ..utils.stats import OLS_fit, IRLS_fit, fit_photobleaching
-from ..utils.window import create_windows_interp, create_windows_nearest, WindowResult
+from ..utils.window import create_windows_interp_1D, create_windows_nearest_1D, WindowResult
 
 class PhotometryExperiment:
     """Handle processing of raw photometry data."""
@@ -118,16 +120,6 @@ class PhotometryExperiment:
         return loader.load()
                 
     # --- pipeline API ---
-    def run_pipeline(self) -> None:
-        """Run the full processing pipeline for one experiment.
-
-        This method is intended to be implemented by child classes.
-
-        Returns:
-            None
-        """
-        return
-    
     def preprocess_signal(
             self,
             cutoff_frequency: float = 3.0, 
@@ -308,11 +300,11 @@ class PhotometryExperiment:
         
     def extract_trial_data(
             self,
-            align_to: str,
-            center_on: list[str],
+            align_to: str | Sequence[str] | float | Sequence[float],
             trial_bounds: tuple[float, float],
+            center_on: str | Sequence[str] | None = None,
             baseline_bounds: tuple[float, float] | None = None,
-            event_tolerences: dict[str, tuple[float, float]] = {},
+            event_tolerences: dict[str, tuple[float, float] | None] = {},
             trial_normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] | Callable = 'none',
             check_overlap: bool = True,
             time_error_threshold: float = 0.1,
@@ -323,23 +315,31 @@ class PhotometryExperiment:
         """Build trial-wise windows, normalize, and store trial data.
 
         Args:
-            align_to (str): Event label used to align and identify trial, should be one per trial.
+            align_to (str | Sequence[str] | float | Sequence[float]): 
+                Event label(s) or timestamp(s) used to build windows for
+                and identify trials. Should be one per trial. If multiple
+                event labels, an ``align_event`` column will be added to
+                ``self.trial_data`` spcifying which alignment event the 
+                trial originated from.
 
-            center_on (list[str]): Event labels to center trial windows on.
+            center_on (str | Sequence[str] | None = None): 
+                Event label(s) to center trial windows on.
                 Events should be mutually exclusive (i.e. lever press choice).
                 If no ``center_on`` events are present within an identified
-                trial, ``align_to`` will be centered on.
+                trial, ``align_to`` will be centered on, as is also the case
+                when ``center_on`` is ``None``.
 
             trial_bounds (tuple[float, float]): Trial window bounds relative to
-                ``center_on`` events.
+                ``center_on`` or ``align_to`` events.
 
             baseline_bounds (tuple[float, float] | None, optional): Baseline
                 window bounds relative to ``align_to`` event used for per-trial
                 normalizations. Defaults to ``None``.
 
-            event_tolerences (dict[str, tuple[float, float]], optional): Time
-                tolerances for event annotation, relative to ``align_to``.
-                Defaults to ``{}``.
+            event_tolerences (dict[str, tuple[float, float] | None] | None, optional): 
+                Time tolerances for event annotation, relative to ``align_to``.
+                Defaults to ``{}``. If ``center_on`` events not specified,
+                there are automatically added with tolerence equal to trial_bounds.
 
             trial_normalization (Literal['zscore', 'zero', 'mad', 'amp', 'none'] | Callable, optional):
                 Normalization method for trial signals based on baselines.
@@ -370,8 +370,9 @@ class PhotometryExperiment:
                 an error if any invalid windows are present.
 
             event_conflict_logic (Literal['first', 'last', 'mean'], optional):
-                Logic for choosing center-on event timestamps if multiple of the
-                same event are present. Defaults to ``'first'``.
+                Logic for choosing event timestamps if multiple of the
+                same event are present within the same trial and within tolerence. 
+                Defaults to ``'first'``.
 
         Returns:
             None
@@ -381,40 +382,41 @@ class PhotometryExperiment:
                 requires baselines.
         """
         # validate inputs
-        if align_to not in self.events: 
-            raise KeyError(f"align_to '{align_to}' not found in events: {list(self.events)}")
-
-        missing = [lab for lab in center_on if lab not in self.events]
-        if missing: raise KeyError(f"center_on labels not found in events: {missing}")
-
         if baseline_bounds is None:
             calc_baselines = False
-            if trial_normalization in ['zscore', 'zero']:
-                raise ValueError(f'Baseline bounds have to be specified to for normalization method {trial_normalization}')
+            if trial_normalization in ['zscore', 'zero', 'mad', 'amp']:
+                raise ValueError(
+                    f'Baseline bounds have to be specified for normalization method {trial_normalization}'
+                )
         else:
             calc_baselines = True
 
-        # build trials around align_to event
-        align_events = self.events[align_to].copy()
-        if align_events.size == 0: raise ValueError(f"No '{align_to}' events found.")
+        # handle alignment
+        align_label, align_events, align_obs = self._resolve_alignment(align_to)
+        
+        # coerce centering
+        center_on = self._coerce_centering(center_on)
+        
+        # coerce tolerences
+        event_tolerences = self._coerce_tolerances(event_tolerences, center_on, trial_bounds)
         
         # annotate events based on tolerences
         events_selected = self._annotate_intervals(
-            align_to=align_to,
-            series=self.time, 
+            align_label=align_label,
+            series=self.time,
             centers=align_events,
             events=self.events, 
             tolorences=event_tolerences,
             logic=event_conflict_logic
-            )
+        )
         
         # find window centers using the selected events
         trial_window_centers = self._find_window_centers(
             center_on=center_on, 
-            align_on=align_to, 
+            align_events=align_events, 
             events=events_selected,
             check_overlap=check_overlap,
-            )
+        )
         
         # construct trial windows
         trial_windows = self._create_windows(
@@ -437,10 +439,10 @@ class PhotometryExperiment:
                 strategy=window_alignment,
             )
         else:
-            baseline_windows = WindowResult.empty()
+            baseline_windows = None
 
         # handle invalid windows
-        self._handle_invalid_windows(
+        valid_trial_mask = self._handle_invalid_windows(
             trial_windows=trial_windows,
             baseline_windows=baseline_windows,
             policy=invalid_window_policy,
@@ -449,14 +451,19 @@ class PhotometryExperiment:
         # apply trial-wise normalization method
         processed_trial_signals = self._apply_trial_normalization(
             trial_normalization=trial_normalization, 
-            raw_trial_signals=trial_windows.signals, 
-            baseline_signals=baseline_windows.signals,
+            trial_windows=trial_windows, 
+            baseline_windows=baseline_windows,
         )
 
         # save trial data
-        self.raw_trial_signal = trial_windows.signals
+        trial_obs = pd.concat(
+                [align_obs.loc[valid_trial_mask].reset_index(drop=True),
+                 pd.DataFrame(trial_windows.events).reset_index(drop=True)], 
+                axis=1,
+            )
+        
         self.trial_data = PhotometryData.from_arrays(
-            obs=pd.DataFrame(trial_windows.events),
+            obs=trial_obs,
             data=processed_trial_signals,
             time_points=trial_windows.time_grid,
             metadata=self.metadata.copy(),
@@ -465,10 +472,15 @@ class PhotometryExperiment:
         # assign trial numbers
         self.trial_data.obs.insert(0, 'trial_num', np.arange(self.trial_data.n_trials, dtype=int) + 1)
 
-        # save baseline data if desired
+        # save baseline data if applicable
         if calc_baselines:
+            baseline_obs = pd.concat(
+                [align_obs.loc[valid_trial_mask].reset_index(drop=True),
+                 pd.DataFrame(baseline_windows.events).reset_index(drop=True)], 
+                axis=1,
+            )
             self.baseline_data = PhotometryData.from_arrays(
-                obs=pd.DataFrame(baseline_windows.events),
+                obs=baseline_obs,
                 data=baseline_windows.signals,
                 time_points=baseline_windows.time_grid,
                 metadata=self.metadata.copy(),
@@ -478,6 +490,26 @@ class PhotometryExperiment:
         time_err = trial_windows.times.std(axis=0).mean()
         if time_err > time_error_threshold:
             raise ValueError(f'Error in rounded times is too high: {time_err} > {time_error_threshold}')
+        
+    def _coerce_tolerances(
+            self,
+            event_tolerences: dict[str, tuple[float, float] | None] | None,
+            center_on: list[str],
+            trial_bounds: tuple[float, float],
+            ) -> dict[str, tuple[float, float]]:
+        
+        event_tolerences = dict(event_tolerences or {})
+        # ensure center on events present
+        for label in center_on:
+            event_tolerences.setdefault(label, trial_bounds)
+
+        # change None to maximum tolerance
+        for label, tolerance in event_tolerences.items():
+            if tolerance is None:
+                event_tolerences[label] = trial_bounds
+
+        new_tolerences: dict[str, tuple[float, float]] = event_tolerences
+        return new_tolerences
 
     # --- signal processing ---
     def low_frequency_pass_butter(
@@ -573,6 +605,9 @@ class PhotometryExperiment:
         window_len = int(window_dur * self.frequency)
         fitted_curve, params = fit_photobleaching(signal, self.time, window=window_len)
         r2_val = r2_score(signal, fitted_curve)
+
+        if np.isnan(fitted_curve).any():
+            raise ValueError(f'Fitted photobleaching curve produced NaNs.')
         
         return fitted_curve, r2_val, params
     
@@ -650,9 +685,14 @@ class PhotometryExperiment:
     def _apply_trial_normalization(
             self, 
             trial_normalization: Literal['zscore', 'zero', 'mad', 'amp', 'none'] | Callable, 
-            raw_trial_signals: np.ndarray, 
-            baseline_signals: np.ndarray,
+            trial_windows: WindowResult, 
+            baseline_windows: WindowResult | None,
             ) -> np.ndarray:
+        # unpack
+        raw_trial_signals = trial_windows.signals
+        baseline_signals = None if baseline_windows is None else baseline_windows.signals
+
+        # execute
         match trial_normalization:
             case func if callable(func):
                 trial_signals = trial_normalization(raw_trial_signals, baseline_signals)
@@ -729,9 +769,107 @@ class PhotometryExperiment:
                 raise ValueError(f'Multiple event selection logic, {logic}, is not recognized')
         return out
     
+    def _resolve_alignment(
+            self,
+            align_to: str | Sequence[str] | float | Sequence[float],
+            ) -> tuple[str, np.ndarray, pd.DataFrame]:
+        # set default manual alignment label   
+        ALIGNMENT_LABEL = 'ALIGNMENTS' 
+
+        # single event
+        if isinstance(align_to, str):
+            if align_to not in self.events: 
+                raise KeyError(
+                    f"align_to '{align_to}' not found in events. "
+                    f"Available events: {list(self.events)}"
+                )
+            
+            align_events = self.events[align_to].copy()
+            align_obs = pd.DataFrame(index=np.arange(align_events.size))
+            align_label = align_to
+
+        # single timestamp
+        elif isinstance(align_to, Real) and not isinstance(align_to, bool):
+            align_events = np.asarray([align_to])
+            align_obs = pd.DataFrame(index=np.arange(align_events.size))
+            align_label = ALIGNMENT_LABEL
+
+        # multiple events
+        elif isinstance(align_to, Sequence) and all(isinstance(v, str) for v in align_to):
+            if len(align_to) == 0:
+                raise ValueError("align_to must contain at least one event label.")
+
+            missing = [label for label in align_to if label not in self.events]
+            if missing:
+                raise KeyError(
+                    f"align_to labels not found in events: {missing}. "
+                    f"Available events: {list(self.events)}"
+                )
+
+            times = np.concatenate([self.events[label] for label in align_to])
+            sources = np.concatenate([
+                np.repeat(label, len(self.events[label]))
+                for label in align_to
+            ])
+
+            order = np.argsort(times, kind="stable")
+
+            align_events = times[order]
+            align_obs = pd.DataFrame(
+                {"align_event": sources[order]},
+                index=np.arange(align_events.size),
+            )
+            align_label = ALIGNMENT_LABEL
+
+        # multiple timestamps
+        elif isinstance(align_to, Sequence) and all(isinstance(v, (float, int)) for v in align_to):
+            if len(align_to) == 0:
+                raise ValueError("align_to must contain at least one timestamp.")
+
+            align_events = np.asarray(align_to, dtype=float)
+            align_obs = pd.DataFrame(index=np.arange(align_events.size))
+            align_label = ALIGNMENT_LABEL
+
+        else:
+            raise ValueError(f'Invalid input type for align_to: {type(align_to)}.')
+
+        # validate
+        if align_events.size == 0:
+            raise ValueError(f"No align_to ({align_to}) events found.")
+
+        if isinstance(align_events, np.ndarray) and (align_events.ndim != 1):
+            raise ValueError(f'align_events is not 1D-array, type: {type(align_events)}, ndim: {align_events.ndim}.')
+    
+        return align_label, align_events, align_obs
+    
+    def _coerce_centering(
+            self, 
+            center_on: str | Sequence[str] | None,
+            ) -> list[str]:
+        if center_on is None:
+            center_out = []
+
+        elif isinstance(center_on, str):
+            if center_on not in self.events:
+                raise KeyError(
+                f"center_on label ({center_on}) not found in events. "
+                f"Available events: {list(self.events)}"
+            ) 
+            center_out = [center_on]
+
+        elif isinstance(center_on, Sequence):
+            missing = [label for label in center_on if label not in self.events]
+            if missing:
+                raise KeyError(
+                f"center_on labels ({missing}) not found in events. "
+                f"Available events: {list(self.events)}"
+            )
+            center_out = list(center_on)
+        return center_out
+    
     def _annotate_intervals(
             self, 
-            align_to: str, 
+            align_label: str, 
             series: np.ndarray, 
             centers: np.ndarray, 
             events: dict[str, np.ndarray], 
@@ -741,7 +879,7 @@ class PhotometryExperiment:
         """Annotate intervals around centers with event timestamps.
 
         Args:
-            align_to (str): Label of the primary alignment event.
+            align_label (str): Label of the primary alignment event.
             series (np.ndarray): Monotonic time-like series.
             centers (np.ndarray): Center times for each trial.
             events (dict[str, np.ndarray]): Mapping of event labels to timestamps.
@@ -753,7 +891,7 @@ class PhotometryExperiment:
         Returns:
             dict[str, np.ndarray]: Mapping from labels to aligned event times per trial.
         """
-        out = {align_to: centers.copy()}
+        out = {align_label: centers.copy()}
         tmin, tmax = series[0], series[-1]
 
         for label, bounds in tolorences.items():
@@ -796,36 +934,43 @@ class PhotometryExperiment:
             bounds: tuple[float, float],
             strategy: Literal['nearest', 'interp'] = 'nearest',
             ) -> WindowResult:
-
         # execute windowing
         match strategy:
             case 'nearest':
-                return create_windows_nearest(signal, time, events, centers, bounds, self.frequency)
+                return create_windows_nearest_1D(signal, time, events, centers, bounds, self.frequency)
             case 'interp':
-                return create_windows_interp(signal, time, events, centers, bounds, self.frequency)
+                return create_windows_interp_1D(signal, time, events, centers, bounds, self.frequency)
             case _:
                 raise ValueError(f'Window alignment strategy {strategy} not recognized.')
             
     def _handle_invalid_windows(
             self,
             trial_windows: WindowResult,
-            baseline_windows: WindowResult,
+            baseline_windows: WindowResult | None,
             policy: Literal['drop', 'error'] = 'drop'
-            ):
-        if baseline_windows.is_empty:
+            ) -> np.ndarray:
+        # find valid trials
+        if baseline_windows is None:
             invalid_mask = trial_windows.invalid_mask
         else:
             invalid_mask = trial_windows.invalid_mask | baseline_windows.invalid_mask
+        valid_mask = ~invalid_mask
 
+        # apply policy
         if invalid_mask.any():
             invalid_idxs = np.flatnonzero(invalid_mask).tolist()
             self.metadata['invalid_windows'] = invalid_idxs
+
             match policy:
                 case 'drop':
-                    trial_windows.apply_mask(~invalid_mask)
-                    baseline_windows.apply_mask(~invalid_mask)
+                    trial_windows.apply_mask(valid_mask)
+                    if baseline_windows is not None:
+                        baseline_windows.apply_mask(valid_mask)
+
                 case 'error':
-                    raise ValueError(f'Invalid trial windows that extend outside signal range at {invalid_idxs}')
+                    raise ValueError(
+                        f'Invalid trial windows that extend outside signal range at trial indicies {invalid_idxs}'
+                    )
                 case _:
                     raise ValueError(f'Invalid window policy {policy} not recognized.')
         else:
@@ -837,11 +982,13 @@ class PhotometryExperiment:
         # confirm some trials remain
         if trial_windows.signals.size == 0:
             raise ValueError(f'No trials remain after dropping invalid windows.')
+        
+        return valid_mask
 
     def _find_window_centers(
             self, 
-            center_on: str | list[str], 
-            align_on: str, 
+            center_on: list[str], 
+            align_events: np.ndarray, 
             events: dict[str, np.ndarray], 
             check_overlap: bool = True
             ) -> np.ndarray:
@@ -850,8 +997,8 @@ class PhotometryExperiment:
         Falls back to ``align_on`` when ``center_on`` is missing.
 
         Args:
-            center_on (str | list[str]): Event labels used as preferred centers.
-            align_on (str): Fallback event label used when center_on is missing.
+            center_on (list[str]): Event labels used as preferred centers.
+            align_events (np.ndarray): Timestamps of alignment timestamps.
             events (dict[str, np.ndarray]): Mapping from labels to event times per trial.
             check_overlap (bool, optional): Whether to throw an error when
                 multiple ``center_on`` events are found in the same trial.
@@ -862,16 +1009,20 @@ class PhotometryExperiment:
         """
         # center_on events should be non-overlaping
         # if no center_on events present, center on align_on
-        if isinstance(center_on, str):
-            center_on = [center_on]
+        centers = align_events.copy()
+        present_count = np.zeros_like(centers, dtype=int)
 
-        centers = events[align_on].copy()
-        overlap = np.full_like(centers, True, dtype=bool)
+        if len(center_on) == 0:
+            return centers
+        
         for label in center_on:
             arr = events[label]
             event_not_nan = ~np.isnan(arr)
             centers[event_not_nan] = arr[event_not_nan]
-            overlap &= event_not_nan
+            present_count += event_not_nan.astype(int)
+
+        overlap = present_count > 1
+
         if check_overlap and overlap.any():
             at_idxs = np.where(overlap)
             culprits = {k : events[k][at_idxs] for k in center_on}
