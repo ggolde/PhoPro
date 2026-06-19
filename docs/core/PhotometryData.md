@@ -56,4 +56,4 @@ trials.trials_to_wide_df(signal_prefix='X', downsample=20)
 
 ---
 
-::: pyFiberPhotometry.core.PhotometryData
+::: PhoPro.core.PhotometryData

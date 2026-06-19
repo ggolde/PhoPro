@@ -11,7 +11,7 @@ pip install .
 
 2. (Requires git) Create a new venv or conda enviroment and run:
 ```
-pip install git+https://github.com/ggolde/pyFiberPhotometry.git
+pip install git+https://github.com/ggolde/PhoPro.git
 ```
 
 3. (Requires conda) Download and unzip the package repository. In the terminal navigate to the project's root folder and run:
@@ -19,7 +19,7 @@ pip install git+https://github.com/ggolde/pyFiberPhotometry.git
 conda env create --name photometry --file=envs/basic_env.yml
 ```
 
-Then activate your enviroment and install pyFiberPhotometry through pip:
+Then activate your enviroment and install PhoPro through pip:
 ```
 conda activate photometry
 pip install .

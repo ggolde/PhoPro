@@ -4,4 +4,4 @@
 
 ---
 
-::: pyFiberPhotometry.analysis.peaks
+::: PhoPro.analysis.peaks

@@ -5,34 +5,34 @@
 ## Overview
 This package provides extensive functionaly for processing, handling, analyzing, and bulk processing fiber photometry datasets while remaining highly extendable to specific use cases. The high level APIs only require basic programming experience. It is built around 4 main modules:
 
-* **[PhotometryLoader](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryLoader/)** - loaders for various photometry data formats.
+* **[PhotometryLoader](https://ggolde.github.io/PhoPro/api/PhotometryLoader/)** - loaders for various photometry data formats.
 
-* **[PhotometryExperiment](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryExperiment/)** - a class for processing and windowing photometry experiments with many avaliable preprocessing methods.
+* **[PhotometryExperiment](https://ggolde.github.io/PhoPro/api/PhotometryExperiment/)** - a class for processing and windowing photometry experiments with many avaliable preprocessing methods.
 
-* **[PhotometryData](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryData/)** - a class holding trial-wise signals and metadata with advanced filtering, averaging, windowing, and analysis functionality.
+* **[PhotometryData](https://ggolde.github.io/PhoPro/api/PhotometryData/)** - a class holding trial-wise signals and metadata with advanced filtering, averaging, windowing, and analysis functionality.
 
-* **[PhotometryPipeline](https://ggolde.github.io/pyFiberPhotometry/api/PhotometryPipeline/)** - a class for easy, highly-customizable bulk processing of photometry data.
+* **[PhotometryPipeline](https://ggolde.github.io/PhoPro/api/PhotometryPipeline/)** - a class for easy, highly-customizable bulk processing of photometry data.
 
 
 With another module for simulating photometry data:
 
-* **[SimulatedPhotometry](https://ggolde.github.io/pyFiberPhotometry/sim/SimulatedPhotometry)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
+* **[SimulatedPhotometry](https://ggolde.github.io/PhoPro/sim/SimulatedPhotometry)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
 
 ---
 
-## [Documentation](https://ggolde.github.io/pyFiberPhotometry/)
+## [Documentation](https://ggolde.github.io/PhoPro/)
 
-Documentation for this package can be found [here](https://ggolde.github.io/pyFiberPhotometry/). It is built with mkdocs-material and hosted on GitHub pages.
+Documentation for this package can be found [here](https://ggolde.github.io/PhoPro/). It is built with mkdocs-material and hosted on GitHub pages.
 
 ---
 
 ## Installation
 You can install directly from GitHub using the command:
 ```
-pip install git+https://github.com/ggolde/pyFiberPhotometry.git
+pip install git+https://github.com/ggolde/PhoPro.git
 ```
 
-See the [Installation](https://ggolde.github.io/pyFiberPhotometry/installation/) page of the docs for more details.
+See the [Installation](https://ggolde.github.io/PhoPro/installation/) page of the docs for more details.
 
 ---
 
@@ -40,7 +40,7 @@ See the [Installation](https://ggolde.github.io/pyFiberPhotometry/installation/)
 
 ```python
 import numpy as np
-from pyFiberPhotometry import PhotometryExperiment, SimulatedPhotometryGenerator
+from PhoPro import PhotometryExperiment, SimulatedPhotometryGenerator
 
 # create simulated data
 sim = SimulatedPhotometryGenerator(
@@ -99,7 +99,7 @@ trials.write_h5ad('example.h5ad')
 ---
 
 ## Planned Features
-This package is in ongoing development, please suggest any features you would like to see implemented on the [issues page](https://github.com/ggolde/pyFiberPhotometry/issues). Below are a few planned features:
+This package is in ongoing development, please suggest any features you would like to see implemented on the [issues page](https://github.com/ggolde/PhoPro/issues). Below are a few planned features:
 * [ ] Implement import support for more formats.
 * [ ] More methods for artifact detection and correction.
 * [ ] Easier APIs for the cluster based permutation test and functional mixed modeling.
@@ -121,7 +121,7 @@ This package is developed and used internally at the [Bizon-Setlow Lab](https://
 
 If you use this package in your work, and want to support the package, use the citation below (a proper publication is hopefully on the horizon):
 
-* Golde G. *pyFiberPhotometry: Python toolkit for simulating, processing, handling, and analyzing fiber photometry data*.
-GitHub repository. Version 0.2.0. Available at: https://github.com/ggolde/pyFiberPhotometry.
+* Golde G. *PhoPro: Python toolkit for simulating, processing, handling, and analyzing fiber photometry data*.
+GitHub repository. Version 0.2.0. Available at: https://github.com/ggolde/PhoPro.
 
 Additionally, if you used the FMM module, please review the [recommended reference(s)](https://github.com/gloewing/photometry_FLMM/blob/main/README.md#references) for the ``fast-fmm-rpy2`` package.

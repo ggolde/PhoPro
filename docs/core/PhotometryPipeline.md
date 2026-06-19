@@ -10,7 +10,7 @@ This example is for an risky decision making task in rats stored in the TDT form
 
 ### Setup
 ```python
-from pyFiberPhotometry import PhotometryExperiment, PhotometryData, PhotometryPipeline, TDTLoader
+from PhoPro import PhotometryExperiment, PhotometryData, PhotometryPipeline, TDTLoader
 
 # --- loader params ---
 shared_loader_kwargs = dict(
@@ -96,4 +96,4 @@ result = pipeline.run(
 
 ---
 
-::: pyFiberPhotometry.core.PhotometryPipeline
+::: PhoPro.core.PhotometryPipeline

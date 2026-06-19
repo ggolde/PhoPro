@@ -4,4 +4,4 @@
 
 ---
 
-::: pyFiberPhotometry.sim.layers
+::: PhoPro.sim.layers

@@ -585,7 +585,7 @@ dependencies:
   - zstd=1.5.7=hbf9d68e_6
   - pip:
       - fast-fmm-rpy2==2.0.0
-      - pyfiberphotometry==0.2.0
+      - PhoPro==0.2.0
       - rpy2-rinterface==3.6.5
       - rpy2-robjects==3.6.4
       - tdt==0.7.3

@@ -4,4 +4,4 @@
 
 ---
 
-::: pyFiberPhotometry.analysis.FMM
+::: PhoPro.analysis.FMM

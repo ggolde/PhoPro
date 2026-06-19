@@ -31,9 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ggolde/pyFiberPhotometry"
-Source = "https://github.com/ggolde/pyFiberPhotometry"
-Issues = "https://github.com/ggolde/pyFiberPhotometry/issues"
+Homepage = "https://github.com/ggolde/PhoPro"
+Source = "https://github.com/ggolde/PhoPro"
+Issues = "https://github.com/ggolde/PhoPro/issues"
 
 [tool.setuptools]
 include-package-data = true

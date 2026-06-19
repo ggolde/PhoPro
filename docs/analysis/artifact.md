@@ -4,4 +4,4 @@
 
 ---
 
-::: pyFiberPhotometry.analysis.artifact
+::: PhoPro.analysis.artifact

@@ -1,18 +1,18 @@
 # Introduction
 
-This tutorial requires ipykernel and Jupyter Notebooks. It covers the basics of the ``pyFiberPhotometry`` package for photometry data processing, handling, and analysis.
+This tutorial requires ipykernel and Jupyter Notebooks. It covers the basics of the ``PhoPro`` package for photometry data processing, handling, and analysis.
 
 # Setup
 
-First we need to import the necessary packages. If you have trouble importing any of the ``pyFiberPhotometry`` modules check to make sure your enviroment is active in the Jupyter Notebook and all dependencies are install properly (see the [Installation](../installation.md) guide on the docs).
+First we need to import the necessary packages. If you have trouble importing any of the ``PhoPro`` modules check to make sure your enviroment is active in the Jupyter Notebook and all dependencies are install properly (see the [Installation](../installation.md) guide on the docs).
 
 
 ```python
 import numpy as np
 import pandas as pd
 
-from pyFiberPhotometry import PhotometryExperiment, PhotometryData
-from pyFiberPhotometry import TDTLoader
+from PhoPro import PhotometryExperiment, PhotometryData
+from PhoPro import TDTLoader
 ```
 
 # 1. Loading
@@ -27,7 +27,7 @@ The ``CSVLoader`` expects:
 
 ```python
 # import loader
-from pyFiberPhotometry import CSVLoader
+from PhoPro import CSVLoader
 
 # initiate loader
 loader = CSVLoader(
@@ -49,7 +49,7 @@ type(exp)
 
 
 
-    pyFiberPhotometry.core.PhotometryExperiment.PhotometryExperiment
+    PhoPro.core.PhotometryExperiment.PhotometryExperiment
 
 
 
@@ -328,7 +328,7 @@ Below we will use a detector the uses outlier derivative score-based detection a
 
 ```python
 # import our artifact handlers
-from pyFiberPhotometry.analysis.artifact import ODS_Detector, Spline_Corrector
+from PhoPro.analysis.artifact import ODS_Detector, Spline_Corrector
 
 # instantiate our artifact detector and corrector
 detector = ODS_Detector(
@@ -1003,7 +1003,7 @@ start_avg.plot_all(
 
 # 5. Extending Functionality
 
-``pyFiberPhotometry`` has been built with extendability in mind. Each of the three core processing modules, ``PhotometryLoader``, ``PhotometryExperiment``, and ``PhotometryData`` can easily be subclassed to provide customized functionality. For bulk-processing many experiments of the same general type subclassing can be incredibly useful.
+``PhoPro`` has been built with extendability in mind. Each of the three core processing modules, ``PhotometryLoader``, ``PhotometryExperiment``, and ``PhotometryData`` can easily be subclassed to provide customized functionality. For bulk-processing many experiments of the same general type subclassing can be incredibly useful.
 
 If you do not have a ton of coding experience, writing your own custom classes can seem intimidating. However, a lot of the difficult parts of processing are already implemented in class methods you just have to wire them together.
 
@@ -1013,7 +1013,7 @@ Let's say I have ~1,000 experiments all stored in TDT vaults. With a subclass I 
 
 
 ```python
-from pyFiberPhotometry import PhotometryExperiment
+from PhoPro import PhotometryExperiment
 
 class CustomExperiment(PhotometryExperiment):
     def __init__(
@@ -1067,7 +1067,7 @@ All a loader class needs is:
 
 
 ```python
-from pyFiberPhotometry import PhotometryLoader
+from PhoPro import PhotometryLoader
 
 class CustomLoader(PhotometryLoader):
     def __init__(self, path_to_table: str, path_to_events: str) -> None:

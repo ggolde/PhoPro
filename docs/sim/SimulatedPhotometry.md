@@ -4,4 +4,4 @@
 
 ---
 
-::: pyFiberPhotometry.sim.SimulatedPhotometry
+::: PhoPro.sim.SimulatedPhotometry

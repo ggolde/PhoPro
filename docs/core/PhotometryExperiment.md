@@ -30,7 +30,7 @@ exp.preprocess_signal(
 **Single channel preprocessing**
 ```python
 # import artifact handlers
-from pyFiberPhotometry.analysis.artifact import ODS_Detector, Spline_Corrector
+from PhoPro.analysis.artifact import ODS_Detector, Spline_Corrector
 
 # instantiate artifact detector and corrector
 detector = ODS_Detector(
@@ -103,4 +103,4 @@ exp.plot_dashboard(raw=False)
 
 ---
 
-::: pyFiberPhotometry.core.PhotometryExperiment
+::: PhoPro.core.PhotometryExperiment

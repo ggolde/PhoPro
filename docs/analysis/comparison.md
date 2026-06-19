@@ -4,4 +4,4 @@
 
 ---
 
-::: pyFiberPhotometry.analysis.comparison
+::: PhoPro.analysis.comparison

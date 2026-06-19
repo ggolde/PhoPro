@@ -477,9 +477,9 @@ def test_anova_methods_delegate_to_pingouin(monkeypatch, photometry_data):
         calls["mixed_anova"] = kwargs
         return pd.DataFrame({"Source": ["interaction"], "F": [3.0]})
 
-    monkeypatch.setattr("pyFiberPhotometry.core.PhotometeryData.pg.anova", fake_anova)
-    monkeypatch.setattr("pyFiberPhotometry.core.PhotometeryData.pg.rm_anova", fake_rm_anova)
-    monkeypatch.setattr("pyFiberPhotometry.core.PhotometeryData.pg.mixed_anova", fake_mixed_anova)
+    monkeypatch.setattr("PhoPro.core.PhotometeryData.pg.anova", fake_anova)
+    monkeypatch.setattr("PhoPro.core.PhotometeryData.pg.rm_anova", fake_rm_anova)
+    monkeypatch.setattr("PhoPro.core.PhotometeryData.pg.mixed_anova", fake_mixed_anova)
 
     aov = photometry_data.ANOVA(dependent_var="score", between="condition")
     rm = photometry_data.ANOVA_rm(dependent_var="score", within="condition", subject="animal")

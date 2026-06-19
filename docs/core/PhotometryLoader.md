@@ -1,8 +1,8 @@
 # PhotometryLoader
 
-**A module for loading data into the ``pyFiberPhotometry`` enviroment.**
+**A module for loading data into the ``PhoPro`` enviroment.**
 
-Currently supports only TDT and CSV formats natively. For other data types, either extend the ``PhotometryLoader`` class or request the feature on [GitHub](https://github.com/ggolde/pyFiberPhotometry/issues).
+Currently supports only TDT and CSV formats natively. For other data types, either extend the ``PhotometryLoader`` class or request the feature on [GitHub](https://github.com/ggolde/PhoPro/issues).
 
 ---
 
@@ -26,4 +26,4 @@ exp = loader.load()
 
 ---
 
-::: pyFiberPhotometry.core.PhotometryLoader
+::: PhoPro.core.PhotometryLoader
