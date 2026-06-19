@@ -1,22 +1,23 @@
 # **PhoPro**
+## Object-oriented photometry processing in Python
 
-*A Python package for extendable and flexible processing and analysis of behavior-coupled fiber photometry experiments.*
+*A comprehensive toolkit for the processing, analysis, and simulation of fiber photometry data*
 
 ## Overview
-This package provides extensive functionaly for processing, handling, analyzing, and bulk processing fiber photometry datasets while remaining highly extendable to specific use cases. The high level APIs only require basic programming experience. It is built around 4 main modules:
+This package provides extensive functionaly for processing, handling, analyzing, and bulk processing fiber photometry datasets while remaining highly customizable. The high level APIs only require basic programming experience. It is built around 4 cores modules:
 
-* **[PhotometryLoader](https://ggolde.github.io/PhoPro/api/PhotometryLoader/)** - loaders for various photometry data formats.
+* **[PhotometryLoader](https://ggolde.github.io/PhoPro/api/PhotometryLoader/)** - loads various photometry data formats.
 
-* **[PhotometryExperiment](https://ggolde.github.io/PhoPro/api/PhotometryExperiment/)** - a class for processing and windowing photometry experiments with many avaliable preprocessing methods.
+* **[PhotometryExperiment](https://ggolde.github.io/PhoPro/api/PhotometryExperiment/)** - processes and windows photometry experiments.
 
-* **[PhotometryData](https://ggolde.github.io/PhoPro/api/PhotometryData/)** - a class holding trial-wise signals and metadata with advanced filtering, averaging, windowing, and analysis functionality.
+* **[PhotometryData](https://ggolde.github.io/PhoPro/api/PhotometryData/)** - handles trial-wise signals and metadata with advanced filtering, averaging, windowing, and analysis functionality.
 
-* **[PhotometryPipeline](https://ggolde.github.io/PhoPro/api/PhotometryPipeline/)** - a class for easy, highly-customizable bulk processing of photometry data.
+* **[PhotometryPipeline](https://ggolde.github.io/PhoPro/api/PhotometryPipeline/)** - handles highly-customizable bulk processing of photometry data.
 
 
-With another module for simulating photometry data:
+With an additional module for rigorously simulating complex photometry data:
 
-* **[SimulatedPhotometry](https://ggolde.github.io/PhoPro/sim/SimulatedPhotometry)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
+* **[SimulatedPhotometry](https://ggolde.github.io/PhoPro/sim/SimulatedPhotometry)** - simulates photometry traces with realistic photobleaching, movement artifacts, and custom event dynamics.
 
 ---
 
@@ -36,77 +37,13 @@ See the [Installation](https://ggolde.github.io/PhoPro/installation/) page of th
 
 ---
 
-## Example Usage
-
-```python
-import numpy as np
-from PhoPro import PhotometryExperiment, SimulatedPhotometryGenerator
-
-# create simulated data
-sim = SimulatedPhotometryGenerator(
-    T_sec=1000,
-    fs=30,
-    n_events=50,
-    event_dur_sec=2,
-    seed=43546
-)
-sim.add_event(
-    relative_to='event',
-    time_range=(1, 2),
-    overall_prob=0.7,
-    choices=['lever1', 'lever2'],
-    choice_probs=[0.7, 0.3],
-)
-exp = sim.to_PhotometryExperiment()
-
-# process signal
-exp.preprocess_signal(
-    cutoff_frequency=2,
-    order=4,
-    correction_method='dF',
-    model='IRLS',
-    c=1.4,
-)
-# extract trials
-exp.extract_trial_data(
-    align_to='event',
-    center_on=['lever1', 'lever2'],
-    trial_bounds=(0, 3),
-    baseline_bounds=(-3, 0),
-    event_tolerences={'lever1':(1, 2), 'lever2':(1, 2)},
-    trial_normalization='zscore',
-    check_overlap=False,
-)
-# get trial data in PhotometryData format
-trials = exp.trial_data
-
-# average data
-avg = trials.collapse(
-    group_on=None,
-    method=np.nanmean,
-    metrics={'std': np.std},
-    data_cols=['event'],
-    count_col='n_trials'
-)
-
-# plot average with errorbars
-avg.plot_all(err_layer='std')
-
-# save data
-trials.write_h5ad('example.h5ad')
-```
-
----
-
 ## Planned Features
 This package is in ongoing development, please suggest any features you would like to see implemented on the [issues page](https://github.com/ggolde/PhoPro/issues). Below are a few planned features:
 * [ ] Implement import support for more formats.
 * [ ] More methods for artifact detection and correction.
-* [ ] Easier APIs for the cluster based permutation test and functional mixed modeling.
-* [ ] Phase out "variants" modules.
-* [ ] Improve windowing in PhotometryData.
-* [x] Improve trial extraction windowing.
-* [x] Pipeline class for easy bulk processing.
+* [x] Easier APIs for the cluster based permutation test and functional mixed modeling.
+* [x] Phase out "variants" modules.
+* [x] Improve windowing in PhotometryData.
 
 ## License
 

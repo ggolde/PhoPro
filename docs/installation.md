@@ -26,7 +26,7 @@ pip install .
 ```
 
 ## FLMM support (requires conda)
-The following tutorial is for adding support for the advanced analysis method [Functional Linear Mixed Modeling](https://github.com/gloewing/photometry_FLMM/) after installing the basic enviroment. The setup can be a pain but the FMM analysis framework can be very insightful. For more information about FMM for photometry data see the [original paper](https://doi.org/10.7554/eLife.95802.2) by Dr. Loewinger.
+Follow the next step after the basic installation to add support for the advanced analysis method [Functional Linear Mixed Modeling](https://github.com/gloewing/photometry_FLMM/) after installing the basic enviroment. The setup can be a pain but the FMM analysis framework can be very insightful. For more information about FMM for photometry data see the [original paper](https://doi.org/10.7554/eLife.95802.2) by Dr. Loewinger.
 
 1. Install all R packages avaliable from conda:
 ```

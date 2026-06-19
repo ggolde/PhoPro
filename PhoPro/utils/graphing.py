@@ -234,14 +234,14 @@ def plot_photometry_data(
     ) | theme_kwargs
 
     # construct plot
-    p = (ggplot(long_df, aes(x='time', y='signal', color=label_col, group=label_col)))
+    p = (ggplot(long_df, aes(x='time', y='signal', color=label_col, group='trial_idx')))
 
     if group_col is not None:
         p = p + facet_wrap(facets=group_col)
 
     if err_layer is not None:
         p = p + geom_ribbon(
-            aes(x='time', ymin='ymin', ymax='ymax', fill=label_col, group=label_col),
+            aes(x='time', ymin='ymin', ymax='ymax', fill=label_col, group='trial_idx'),
             **ribbon_kwargs
         )
 

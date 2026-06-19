@@ -1,6 +1,8 @@
 site_name: PhoPro
-site_url: https://mydomain.org/mysite
+site_url: https://ggolde.github.io/PhoPro/
 site_description: Documentation for the PhoPro Python package
+
+# apperence
 theme:
   name: material
   palette:
@@ -17,6 +19,14 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
 
+# extras
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+        
+extra_css:
+  - stylesheets/extra.css
+
 # markdown extensions
 markdown_extensions:
   - sane_lists
@@ -24,6 +34,8 @@ markdown_extensions:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
@@ -39,30 +51,44 @@ plugins:
             docstring_style: numpy
             docstring_section_style: list
             merge_init_into_class: true
+
             show_docstring_attributes: false
             show_docstring_functions: true
             show_docstring_classes: false
             show_docstring_modules: false
+
             show_signature: true
+            show_signature_annotations: true
+            separate_signature: true
+            line_length: 88
+            signature_crossrefs: true
+            modernize_annotations: true
+
             members_order: source
             filters:
-              - "!^_[^_]"
+              - "!^_"
+              - "^__init__$"
 
 nav:
   - Home: index.md
   - Installation: installation.md
   - Tutorials:
-      - Basic Usage: tutorials/Basic_Usage.md
-  - Core:
-      - PhotometryExperiment: core/PhotometryExperiment.md
-      - PhotometryData: core/PhotometryData.md
-      - PhotometryLoader: core/PhotometryLoader.md
-      - PhotometryPipeline: core/PhotometryPipeline.md
-  - Simulation:
-      - SimulatedPhotometry: sim/SimulatedPhotometry.md
-      - Simulation Layers: sim/layers.md
-  - Analysis:
-      - Artifacts: analysis/artifact.md
-      - Comparison: analysis/comparison.md
-      - Peaks: analysis/peaks.md
-      - FMM: analysis/FMM.md
+      - Introduction: tutorials/Introduction.md
+      - Simulating Photometry: "tutorials/Simulating Photometry.md"
+      - Signal Processing: "tutorials/Signal Processing"
+      - Data Handling & Analysis: "tutorials/Data Handling and Analysis"
+      - Batch Processing: "tutorials/Batch Processing.md"
+  - PhoPro:
+    - Core:
+        - PhotometryExperiment: PhoPro/core/PhotometryExperiment.md
+        - PhotometryData: PhoPro/core/PhotometryData.md
+        - PhotometryLoader: PhoPro/core/PhotometryLoader.md
+        - PhotometryPipeline: PhoPro/core/PhotometryPipeline.md
+    - Simulation:
+        - SimulatedPhotometry: PhoPro/sim/SimulatedPhotometry.md
+        - Simulation Layers: PhoPro/sim/layers.md
+    - Analysis:
+        - Artifacts: PhoPro/analysis/artifact.md
+        - Comparison: PhoPro/analysis/comparison.md
+        - Peaks: PhoPro/analysis/peaks.md
+        - FMM: PhoPro/analysis/FMM.md
