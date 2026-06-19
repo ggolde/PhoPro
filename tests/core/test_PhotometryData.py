@@ -1,7 +1,11 @@
+import warnings
+
 import numpy as np
+import pandas as pd
 import pytest
 
-from pyFiberPhotometry.core.PhotometeryData import PhotometryData
+from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.analysis.peaks import PeakResult
 
 
 # --- constructors and basic shape contracts ---
@@ -27,7 +31,86 @@ def test_from_arrays_rejects_mismatched_layer_shape(photometry_data):
         )
 
 
+def test_str_repr_and_property_setters_preserve_accessors(photometry_data):
+    text = str(photometry_data)
+    assert "3 trials" in text
+    assert repr(photometry_data) == text
+
+    new_x = np.ones_like(photometry_data.X)
+    new_obs = photometry_data.obs.assign(flag=True)
+    new_var = photometry_data.var.assign(time_idx=np.arange(photometry_data.n_times))
+    new_uns = {"frequency": 2.0, "source": "setter_test"}
+
+    photometry_data.X = new_x
+    photometry_data.obs = new_obs
+    photometry_data.var = new_var
+    photometry_data.uns = new_uns
+
+    assert np.array_equal(photometry_data.X, new_x)
+    assert photometry_data.obs["flag"].all()
+    assert "time_idx" in photometry_data.var
+    assert photometry_data.uns["source"] == "setter_test"
+    assert np.isclose(photometry_data.dt, 1 / photometry_data.freq)
+
+
+def test_h5ad_roundtrip_preserves_data_layers_and_metadata(photometry_data, tmp_path):
+    path = tmp_path / "photometry.h5ad"
+
+    photometry_data.write_h5ad(str(path))
+    loaded = PhotometryData.read_h5ad(str(path))
+
+    assert isinstance(loaded, PhotometryData)
+    assert np.allclose(loaded.X, photometry_data.X)
+    assert np.allclose(loaded.get_layer("layer"), photometry_data.get_layer("layer"))
+    assert loaded.obs["animal"].tolist() == photometry_data.obs["animal"].tolist()
+    assert loaded.uns["frequency"] == photometry_data.uns["frequency"]
+
+
+def test_zarr_roundtrip_preserves_shape_if_zarr_is_available(photometry_data, tmp_path):
+    pytest.importorskip("zarr")
+    path = tmp_path / "photometry.zarr"
+
+    photometry_data.write_zarr(str(path))
+    loaded = PhotometryData.read_zarr(str(path))
+
+    assert loaded.X.shape == photometry_data.X.shape
+    assert loaded.get_layer("layer").shape == photometry_data.get_layer("layer").shape
+
+
+def test_append_on_disk_h5ad_creates_then_appends(photometry_data, tmp_path):
+    path = tmp_path / "combined.h5ad"
+    other = photometry_data.filter_rows(np.array([True, False, True]), inplace=False)
+
+    photometry_data.append_on_disk_h5ad(str(path))
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="Observation names are not unique")
+        other.append_on_disk_h5ad(str(path))
+    loaded = PhotometryData.read_h5ad(str(path))
+
+    assert loaded.n_trials == photometry_data.n_trials + other.n_trials
+    assert loaded.n_times == photometry_data.n_times
+    assert loaded.obs.index.is_unique
+
+
 # --- row, metadata, and object operations ---
+
+def test_copy_returns_independent_object(photometry_data):
+    copied = photometry_data.copy()
+    copied.X[0, 0] = -1.0
+
+    assert isinstance(copied, PhotometryData)
+    assert copied is not photometry_data
+    assert photometry_data.X[0, 0] != -1.0
+
+
+def test_pipe_passes_object_and_arguments(photometry_data):
+    def add_scaled_score(data, scale):
+        return data.mutate_obs(scaled_score=data.obs["score"] * scale)
+
+    out = photometry_data.pipe(add_scaled_score, 2.0)
+
+    assert out.obs["scaled_score"].tolist() == [2.0, 6.0, 10.0]
+
 
 def test_downsample_reduces_time_dimension_layers_and_frequency(photometry_data):
     out = photometry_data.downsample(2)
@@ -39,6 +122,10 @@ def test_downsample_reduces_time_dimension_layers_and_frequency(photometry_data)
     assert out.obs["animal"].tolist() == photometry_data.obs["animal"].tolist()
     assert np.isclose(out.uns["frequency"], 0.5)
     assert np.isclose(out.freq, 0.5, atol=0.1)
+
+
+def test_downsample_none_returns_self(photometry_data):
+    assert photometry_data.downsample(None) is photometry_data
 
 
 def test_combine_obj_returns_combined_object(photometry_data):
@@ -76,6 +163,28 @@ def test_filter_rows_inplace_updates_object(photometry_data):
     assert result is None
     assert photometry_data.n_trials == 2
     assert photometry_data.obs["animal"].tolist() == ["a", "b"]
+
+
+def test_filter_rows_none_is_noop_for_copy_and_inplace(photometry_data):
+    out = photometry_data.filter_rows(None, inplace=False)
+    result = photometry_data.filter_rows(None, inplace=True)
+
+    assert out is photometry_data
+    assert result is None
+    assert photometry_data.n_trials == 3
+
+
+def test_mutate_obs_accepts_values_callables_and_none(photometry_data):
+    out = photometry_data.mutate_obs(
+        constant="ok",
+        doubled=lambda data: data.obs["score"] * 2,
+        skipped=lambda data: None,
+    )
+
+    assert out.obs["constant"].tolist() == ["ok", "ok", "ok"]
+    assert out.obs["doubled"].tolist() == [2.0, 6.0, 10.0]
+    assert "skipped" not in out.obs
+    assert "constant" not in photometry_data.obs
 
 
 def test_add_obs_columns_and_drop_obs_columns(photometry_data):
@@ -195,7 +304,39 @@ def test_window_invalid_policy_error_raises(photometry_data):
         )
 
 
+def test_window_interp_strategy_uses_exact_shared_timebase(photometry_data):
+    out = photometry_data.window(
+        centers=np.asarray([5.25, 10.5, 14.75]),
+        bounds=(-1.0, 2.0),
+        strategy="interp",
+    )
+
+    assert out.X.shape == (photometry_data.n_trials, 3)
+    assert np.allclose(out.ts, np.asarray([-1.0, 0.0, 1.0]))
+
+
+def test_window_rejects_unknown_strategy(photometry_data):
+    with pytest.raises(ValueError, match="not recognized"):
+        photometry_data.window(
+            centers=10.0,
+            bounds=(-1.0, 1.0),
+            strategy="bogus",
+        )
+
+
 # --- numerical summaries and dataframe exports ---
+
+def test_difference_calculates_repeated_discrete_derivative(photometry_data):
+    data = np.asarray([[0.0, 1.0, 3.0, 6.0]])
+    obj = PhotometryData.from_arrays(
+        obs=pd.DataFrame({"trial": [0]}),
+        data=data,
+        time_points=np.arange(data.shape[1]),
+    )
+
+    assert np.allclose(obj.difference(n=1), [[0.0, 1.0, 2.0, 3.0]])
+    assert np.allclose(obj.difference(n=2), [[0.0, 1.0, 1.0, 1.0]])
+
 
 def test_area_under_curve_matches_numpy_trapezoid(photometry_data):
     auc = photometry_data.area_under_curve()
@@ -211,6 +352,14 @@ def test_area_under_curve_applies_transformation(photometry_data):
     assert np.allclose(auc, expected)
 
 
+def test_area_under_curve_can_window_before_integrating(photometry_data):
+    auc = photometry_data.area_under_curve(centers=10.0, bounds=(-2.0, 2.0))
+    windows = photometry_data.window(centers=10.0, bounds=(-2.0, 2.0))
+    expected = np.trapezoid(y=windows.X, x=windows.ts, axis=1)
+
+    assert np.allclose(auc, expected)
+
+
 def test_trials_to_long_df_has_expected_columns_and_size(photometry_data):
     df = photometry_data.trials_to_long_df(
         err_layer="layer",
@@ -218,17 +367,25 @@ def test_trials_to_long_df_has_expected_columns_and_size(photometry_data):
         downsample=None,
     )
 
-    assert {"trial_id", "time_idx", "time", "signal", "animal", "condition", "layer"} <= set(df.columns)
+    assert {"trial_idx", "time_idx", "time", "signal", "animal", "condition", "layer"} <= set(df.columns)
     assert len(df) == photometry_data.n_trials * photometry_data.n_times
     assert df["time_idx"].min() == 0
     assert df["time_idx"].max() == photometry_data.n_times - 1
 
 
-def test_trials_to_long_df_default_downsamples(photometry_data):
-    df = photometry_data.trials_to_long_df(obs_cols=["animal"])
+def test_trials_to_long_df_can_export_named_layer_and_downsample(photometry_data):
+    df = photometry_data.trials_to_long_df(
+        layer="layer",
+        obs_cols="animal",
+        downsample=10,
+    )
 
     assert len(df) == photometry_data.n_trials * 2
     assert df["time_idx"].max() == 1
+    assert np.allclose(
+        df.loc[df["trial_idx"] == "0", "signal"].to_numpy(),
+        photometry_data.downsample(10).get_layer("layer")[0],
+    )
 
 
 def test_trials_to_wide_df_has_obs_and_signal_columns(photometry_data):
@@ -242,3 +399,115 @@ def test_trials_to_wide_df_has_obs_and_signal_columns(photometry_data):
     assert df["animal"].tolist() == photometry_data.obs["animal"].tolist()
     assert len(signal_cols) == 10
     assert len(df) == photometry_data.n_trials
+
+
+def test_trials_to_wide_df_defaults_to_all_obs_and_can_export_layer(photometry_data):
+    df = photometry_data.trials_to_wide_df(layer="layer", signal_prefix="layer_sig")
+
+    assert {"animal", "condition", "score"} <= set(df.columns)
+    assert len([col for col in df.columns if col.startswith("layer_sig.")]) == photometry_data.n_times
+
+
+# --- peak wrappers and metadata statistics ---
+
+def _peak_test_data() -> PhotometryData:
+    signals = np.zeros((2, 10), dtype=float)
+    signals[0, 2:4] = 2.0
+    signals[1, 6:8] = -2.0
+    obs = pd.DataFrame({"trial": [0, 1], "group": ["a", "b"]})
+    return PhotometryData.from_arrays(obs=obs, data=signals, time_points=np.arange(10))
+
+
+def test_detect_peaks_static_threshold_returns_peak_result():
+    obj = _peak_test_data()
+    baselines = np.zeros((1, obj.n_times), dtype=float)
+
+    result = obj.detect_peaks_static_threshold(
+        center_method="zeros",
+        scale_method="ones",
+        test_magnitude=0.5,
+        baselines=baselines,
+        direction="both",
+    )
+
+    assert isinstance(result, PeakResult)
+    assert result.n_peaks == 2
+    assert set(result.df["direction"]) == {"positive", "negative"}
+
+
+def test_detect_peaks_static_threshold_rejects_baseline_row_mismatch():
+    obj = _peak_test_data()
+
+    with pytest.raises(ValueError, match="Baselines"):
+        obj.detect_peaks_static_threshold(
+            center_method="zeros",
+            scale_method="ones",
+            baselines=np.zeros((3, obj.n_times)),
+        )
+
+
+def test_detect_peaks_rolling_threshold_returns_peak_result():
+    obj = _peak_test_data()
+
+    result = obj.detect_peaks_rolling_threshold(
+        window_width_sec=3.0,
+        center_method="zeros",
+        scale_method="ones",
+        test_magnitude=0.5,
+        direction="positive",
+    )
+
+    assert isinstance(result, PeakResult)
+    assert result.n_peaks == 1
+    assert result.df.iloc[0]["trial_idx"] == 0
+
+
+def test_anova_methods_delegate_to_pingouin(monkeypatch, photometry_data):
+    calls = {}
+
+    def fake_anova(data, **kwargs):
+        calls["anova"] = kwargs
+        return pd.DataFrame({"Source": ["condition"], "F": [1.0]})
+
+    def fake_rm_anova(data, **kwargs):
+        calls["rm_anova"] = kwargs
+        return pd.DataFrame({"Source": ["phase"], "F": [2.0]})
+
+    def fake_mixed_anova(data, **kwargs):
+        calls["mixed_anova"] = kwargs
+        return pd.DataFrame({"Source": ["interaction"], "F": [3.0]})
+
+    monkeypatch.setattr("pyFiberPhotometry.core.PhotometeryData.pg.anova", fake_anova)
+    monkeypatch.setattr("pyFiberPhotometry.core.PhotometeryData.pg.rm_anova", fake_rm_anova)
+    monkeypatch.setattr("pyFiberPhotometry.core.PhotometeryData.pg.mixed_anova", fake_mixed_anova)
+
+    aov = photometry_data.ANOVA(dependent_var="score", between="condition")
+    rm = photometry_data.ANOVA_rm(dependent_var="score", within="condition", subject="animal")
+    mixed = photometry_data.ANOVA_mixed(
+        dependent_var="score",
+        between="animal",
+        within="condition",
+        subject="animal",
+    )
+
+    assert aov.loc[0, "F"] == 1.0
+    assert rm.loc[0, "F"] == 2.0
+    assert mixed.loc[0, "F"] == 3.0
+    assert calls["anova"]["dv"] == "score"
+    assert calls["rm_anova"]["within"] == "condition"
+    assert calls["mixed_anova"]["between"] == "animal"
+
+
+# --- plotting ---
+
+def test_plot_trials_returns_plotnine_object(photometry_data):
+    plot = photometry_data.plot_trials(
+        sel=np.array([True, False, True]),
+        label_with=["animal", "condition"],
+        group_on="animal",
+        err_layer="layer",
+        downsample=None,
+        line_kwargs={"color": "black"},
+    )
+
+    assert hasattr(plot, "draw")

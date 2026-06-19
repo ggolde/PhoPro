@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pyFiberPhotometry"
-version = "0.2.0"
+name = "PhoPro"
+version = "0.5.0"
 description = "Python package for processing, handling, and analyzing fiber photometry data"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,7 @@ dependencies = [
   "tdt",
   "pytest",
   "pyyaml",
+  "plotnine",
 ]
 
 [project.urls]

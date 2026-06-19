@@ -3,29 +3,30 @@ import pandas as pd
 import pathlib
 import pytest
 
-from pyFiberPhotometry.core.PhotometryExperiment import PhotometryExperiment
-from pyFiberPhotometry.core.PhotometeryData import PhotometryData
-from pyFiberPhotometry.core.PhotometryLoader import PhotometryLoader
-from pyFiberPhotometry.core.PhotometryPipeline import PhotometryPipeline
-from pyFiberPhotometry.utils.sim import SimulatedPhotometryGenerator
+from PhoPro.core.PhotometryExperiment import PhotometryExperiment
+from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.core.PhotometryLoader import PhotometryLoader
+from PhoPro.core.PhotometryPipeline import PhotometryPipeline
+from PhoPro.sim.SimulatedPhotometry import SimulatedPhotometry
 
 # simulated data
-def simulate_data() -> SimulatedPhotometryGenerator:
-    sim = SimulatedPhotometryGenerator(
-        T_sec=120,
-        fs=20.0,
+def simulate_data() -> SimulatedPhotometry:
+    sim = SimulatedPhotometry.from_parameters(
+        length_sec=120,
+        frequency=20,
+        event_label='event',
         n_events=12,
-        event_dur_sec=2.0,
-        n_artifacts=4,
+        iso_bleach_scale=1.0,
+        gaussian_noise_scale=None,
+        photons_per_unit=None,
         seed=7,
-        bleach_iso_scale=1.0,
     )
-    sim.add_event(
+    sim.add_event_relative_to(
+        relative_to='event',
         time_range=(0.2, 0.8),
         overall_prob=1.0,
-        choices=["choice_left", "choice_right"],
+        labels=['choice_left', 'choice_right'],
         choice_probs=[0.5, 0.5],
-        relative_to="event",
     )
     return sim
 
@@ -48,7 +49,6 @@ class DummyExperiment(PhotometryExperiment):
             baseline_bounds=(-2.0, 0.0),
             trial_normalization="none",
             check_overlap=True,
-            time_error_threshold=0.2,
             event_conflict_logic="first",
         )
 
@@ -68,9 +68,9 @@ class DummyLoader(PhotometryLoader):
         data = dict(
             raw_signal = exp.F_exp,
             raw_isosbestic = exp.F_iso,
-            time = exp.t,
-            frequency = None,
-            events = exp.events,
+            time = exp.time,
+            frequency = exp.freq,
+            events = exp.event_layer.timestamps_to_dict(),
             metadata = self.metadata,
         )
         return data
@@ -85,9 +85,9 @@ def experiment(sim):
     return DummyExperiment(
         raw_signal=sim.F_exp,
         raw_isosbestic=sim.F_iso,
-        time=sim.t,
-        frequency=sim.fs,
-        events=sim.events,
+        time=sim.time,
+        frequency=sim.freq,
+        events=sim.event_layer.timestamps_to_dict(),
         metadata={'source':'simulated_test'}
     )
 
@@ -97,9 +97,9 @@ def single_channel_experiment(sim):
     return PhotometryExperiment(
         raw_signal=sim.F_exp,
         raw_isosbestic=None,
-        time=sim.t,
-        frequency=sim.fs,
-        events=sim.events.copy(),
+        time=sim.time,
+        frequency=sim.freq,
+        events=sim.event_layer.timestamps_to_dict().copy(),
         metadata={'source':'simulated_test'}
     )
 

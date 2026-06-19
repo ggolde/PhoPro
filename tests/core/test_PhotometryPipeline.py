@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pyFiberPhotometry.core.PhotometryExperiment import PhotometryExperiment
+from PhoPro.core.PhotometryExperiment import PhotometryExperiment
 
 # --- component tests ---
 def test_pipeline_identifies_correct_input_data(dummy_pipeline):
@@ -19,6 +19,57 @@ def test_pipeline_constructs_jobs_correctly(dummy_pipeline):
 
     assert len(one_loader_jobs) == len(inputs)
     assert len(two_loader_jobs) == 2*len(inputs)
+
+def test_pipeline_constructs_jobs_from_path_aware_loader_kwargs(dummy_pipeline):
+    inputs = dummy_pipeline.discover_inputs()
+    received_inputs = []
+
+    def loader_kwargs(path):
+        received_inputs.append(path)
+        return {'annotation_file': path.with_suffix('.json')}
+
+    jobs = dummy_pipeline._build_jobs(inputs, loader_kwargs, {}, {})
+
+    assert received_inputs == inputs
+    assert len(jobs) == len(inputs)
+    assert all(
+        job['loader_kwargs']['annotation_file'] == job['input'].with_suffix('.json')
+        for job in jobs
+    )
+
+def test_pipeline_path_aware_loader_kwargs_can_create_multiple_jobs(dummy_pipeline):
+    inputs = dummy_pipeline.discover_inputs()
+
+    def loader_kwargs(path):
+        return [
+            {'annotation_file': path.with_suffix('.json')},
+            {'annotation_file': path.with_name(f'{path.stem}_alternate.json')},
+        ]
+
+    jobs = dummy_pipeline._build_jobs(inputs, loader_kwargs, {}, {})
+
+    assert len(jobs) == 2*len(inputs)
+    assert all(isinstance(job['loader_kwargs'], dict) for job in jobs)
+
+def test_pipeline_path_aware_loader_kwargs_validates_result_shape(dummy_pipeline):
+    inputs = dummy_pipeline.discover_inputs()
+
+    def loader_kwargs(path):
+        return ['bad-loader-kwargs']
+
+    with pytest.raises(TypeError, match='loader_kwargs.*must be a dict or a list of dicts'):
+        dummy_pipeline._build_jobs(inputs, loader_kwargs, {}, {})
+
+def test_pipeline_validates_resolved_loader_kwargs(dummy_pipeline):
+    inputs = dummy_pipeline.discover_inputs()
+
+    def loader_kwargs(path):
+        return {'unexpected_kwarg': True}
+
+    jobs = dummy_pipeline._build_jobs(inputs[:1], loader_kwargs, {}, {})
+
+    with pytest.raises(TypeError, match='Unexpected kwargs'):
+        dummy_pipeline._validate_loader_kwargs(jobs[0]['loader_kwargs'])
 
 # --- workflow tests ---
 def test_pipeline_full_run(dummy_pipeline):
@@ -65,7 +116,6 @@ def test_pipeline_full_run(dummy_pipeline):
             baseline_bounds=(-2.0, 0.0),
             trial_normalization="none",
             check_overlap=True,
-            time_error_threshold=0.2,
             event_conflict_logic="first",
         ),
         passdown_metadata=passdown_metadata,

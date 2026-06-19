@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 import pathlib
 
-from pyFiberPhotometry.core.PhotometryExperiment import PhotometryExperiment
-from pyFiberPhotometry.core.PhotometeryData import PhotometryData
-from pyFiberPhotometry.core.PhotometryLoader import PhotometryLoader, TDTLoader, CSVLoader
+from PhoPro.core.PhotometryExperiment import PhotometryExperiment
+from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.core.PhotometryLoader import PhotometryLoader, TDTLoader, CSVLoader
 
 # --- correct loading ---
 

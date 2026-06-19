@@ -1,4 +1,4 @@
-# **pyFiberPhotometry**
+# **PhoPro**
 
 *A Python package for extendable and flexible processing and analysis of behavior-coupled fiber photometry experiments.*
 
@@ -16,7 +16,7 @@ This package provides extensive functionaly for processing, handling, analyzing,
 
 With another module for simulating photometry data:
 
-* **[SimulatedPhotometryGenerator](https://ggolde.github.io/pyFiberPhotometry/api/SimulatedPhotometryGenerator/)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
+* **[SimulatedPhotometry](https://ggolde.github.io/pyFiberPhotometry/sim/SimulatedPhotometry)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
 
 ---
 

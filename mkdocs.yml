@@ -1,6 +1,6 @@
-site_name: pyFiberPhotometry
+site_name: PhoPro
 site_url: https://mydomain.org/mysite
-site_description: Documentation for pyFiberPhotometry
+site_description: Documentation for the PhoPro Python package
 theme:
   name: material
   palette:
@@ -36,7 +36,7 @@ plugins:
       handlers:
         python:
           options:
-            docstring_style: google
+            docstring_style: numpy
             docstring_section_style: list
             merge_init_into_class: true
             show_docstring_attributes: false
@@ -53,9 +53,16 @@ nav:
   - Installation: installation.md
   - Tutorials:
       - Basic Usage: tutorials/Basic_Usage.md
-  - API:
-      - PhotometryExperiment: api/PhotometryExperiment.md
-      - PhotometryData: api/PhotometryData.md
-      - PhotometryLoader: api/PhotometryLoader.md
-      - PhotometryPipeline: api/PhotometryPipeline.md
-      - SimulatedPhotometryGenerator: api/SimulatedPhotometryGenerator.md
+  - Core:
+      - PhotometryExperiment: core/PhotometryExperiment.md
+      - PhotometryData: core/PhotometryData.md
+      - PhotometryLoader: core/PhotometryLoader.md
+      - PhotometryPipeline: core/PhotometryPipeline.md
+  - Simulation:
+      - SimulatedPhotometry: sim/SimulatedPhotometry.md
+      - Simulation Layers: sim/layers.md
+  - Analysis:
+      - Artifacts: analysis/artifact.md
+      - Comparison: analysis/comparison.md
+      - Peaks: analysis/peaks.md
+      - FMM: analysis/FMM.md

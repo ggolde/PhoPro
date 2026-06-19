@@ -12,3 +12,6 @@ MANIFEST.in
 site/
 .github/
 docs/tutorials/Basic_Usage_files
+utils_old/
+archive/
+workshop/

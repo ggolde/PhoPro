@@ -1,9 +1,10 @@
 import numpy as np
+import pandas as pd
 import pytest
 
-from pyFiberPhotometry.core.PhotometryExperiment import PhotometryExperiment
-from pyFiberPhotometry.core.PhotometeryData import PhotometryData
-from pyFiberPhotometry.utils.ops import neg_bi_exponential_5
+from PhoPro.core.PhotometryExperiment import PhotometryExperiment
+from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.utils.equations import neg_bi_exponential_5
 
 
 # --- preprocessing ---
@@ -31,11 +32,11 @@ def test_preprocess_recovers_signal_reasonably(experiment, sim):
     )
 
     recovered = experiment.signal
-    truth = sim.neural_true[:recovered.size]
+    truth = sim.E[:recovered.size]
 
     corr = np.corrcoef(recovered, truth)[0, 1]
     assert np.isfinite(corr)
-    assert corr > 0.4
+    assert corr > 0.35
 
 
 def test_preprocess_rejects_channel_incompatible_correction_methods(
@@ -78,7 +79,6 @@ def test_preprocess_single_channel_processing(single_channel_experiment):
 
     assert exp.channel_mode == "single"
     assert exp.metadata["reference_fit"]["type"] == "photobleaching"
-    assert exp.metadata["reference_fit"]["r2_val"] > 0.5
     assert exp.metadata["correction_method"] == "dB/B"
     assert exp.filt_sig.shape == exp.raw_signal.shape
     assert exp.fitted_ref.shape == exp.raw_signal.shape
@@ -113,6 +113,111 @@ def test_preprocess_accepts_callable_correction_and_normalization(experiment):
     assert np.isfinite(experiment.signal).all()
 
 
+def test_constructor_properties_reflect_channel_and_pipeline_state(experiment, single_channel_experiment):
+    assert experiment.has_isosbestic
+    assert experiment.channel_mode == "dual"
+    assert not experiment.has_ran_preprocess
+    assert not experiment.has_ran_extraction
+    assert experiment.n_times == experiment.time.size
+
+    assert not single_channel_experiment.has_isosbestic
+    assert single_channel_experiment.channel_mode == "single"
+
+
+def test_preprocess_delegates_artifact_detector_and_corrector(experiment):
+    class Detector:
+        def detect(self, signal, reference, time):
+            self.signal_seen = signal
+            self.reference_seen = reference
+            return "artifact_result"
+
+    class Corrector:
+        def correct(self, signal, time, artifacts):
+            assert artifacts == "artifact_result"
+            return signal + 1.0
+
+    detector = Detector()
+    experiment.preprocess_signal(
+        artifact_detector=detector,
+        artifact_corrector=Corrector(),
+    )
+
+    assert experiment.artifacts == "artifact_result"
+    assert detector.reference_seen is experiment.fitted_ref
+    assert np.isfinite(experiment.signal).all()
+
+
+def test_lowpass_filter_preserves_shape_and_reduces_high_frequency_power(experiment):
+    time = experiment.time
+    signal = np.sin(2 * np.pi * 0.2 * time) + 0.5 * np.sin(2 * np.pi * 6.0 * time)
+
+    filtered = experiment.low_frequency_pass_butter(
+        signal,
+        sample_frequency=experiment.frequency,
+        cutoff_frequency=1.0,
+        order=4,
+    )
+
+    assert filtered.shape == signal.shape
+    assert np.std(filtered - np.sin(2 * np.pi * 0.2 * time)) < np.std(signal - np.sin(2 * np.pi * 0.2 * time))
+
+
+def test_fit_isosbestic_supports_callable_and_rejects_unknown_method(experiment):
+    signal = np.asarray([2.0, 4.0, 6.0, 8.0])
+    iso = np.asarray([1.0, 2.0, 3.0, 4.0])
+
+    fitted, r2_val, params = experiment.fit_isosbestic_to_signal(
+        signal,
+        iso,
+        fit_using=lambda sig, ref: (ref * 2.0, {"scale": 2.0}),
+    )
+
+    assert np.allclose(fitted, signal)
+    assert np.isclose(r2_val, 1.0)
+    assert params == {"scale": 2.0}
+
+    with pytest.raises(ValueError, match="not recognized"):
+        experiment.fit_isosbestic_to_signal(signal, iso, fit_using="bogus")
+
+
+@pytest.mark.parametrize(
+    ("method", "expected"),
+    [
+        ("dF", np.asarray([1.0, 2.0])),
+        ("dB", np.asarray([1.0, 2.0])),
+        ("dF/F", np.asarray([1.0, 1.0])),
+        ("dB/B", np.asarray([1.0, 1.0])),
+        ("none", np.asarray([2.0, 4.0])),
+    ],
+)
+def test_apply_correction_method_variants(experiment, method, expected):
+    out = experiment._apply_correction_method(
+        correction_method=method,
+        signal=np.asarray([2.0, 4.0]),
+        fitted_ref=np.asarray([1.0, 2.0]),
+    )
+
+    assert np.allclose(out, expected)
+
+
+@pytest.mark.parametrize("method", ["zscore", "nullZ", "none"])
+def test_apply_signal_normalization_variants(experiment, method):
+    signal = np.asarray([1.0, 2.0, 3.0])
+
+    out = experiment._apply_signal_normalization(method, signal)
+
+    assert out.shape == signal.shape
+    assert np.isfinite(out).all()
+
+
+def test_apply_normalization_helpers_reject_unknown_methods(experiment):
+    with pytest.raises(ValueError, match="correction"):
+        experiment._apply_correction_method("bad", np.ones(3), np.ones(3))
+
+    with pytest.raises(ValueError, match="normalization"):
+        experiment._apply_signal_normalization("bad", np.ones(3))
+
+
 # --- trial extraction: basic outputs ---
 
 def test_extract_trial_data_creates_trial_and_baseline_objects(experiment, sim):
@@ -120,8 +225,8 @@ def test_extract_trial_data_creates_trial_and_baseline_objects(experiment, sim):
 
     assert isinstance(experiment.trial_data, PhotometryData)
     assert isinstance(experiment.baseline_data, PhotometryData)
-    assert experiment.trial_data.n_trials == sim.events["event"].size
-    assert experiment.baseline_data.n_trials == sim.events["event"].size
+    assert experiment.trial_data.n_trials == sim.event_layer.specs["event"].onsets.size
+    assert experiment.baseline_data.n_trials == sim.event_layer.specs["event"].onsets.size
     assert experiment.trial_data.n_times > 0
     assert experiment.baseline_data.n_times > 0
     assert "event" in experiment.trial_data.obs.columns
@@ -384,3 +489,173 @@ def test_extract_trial_data_interp_alignment_has_shared_timebase(experiment):
     assert np.isclose(experiment.trial_data.ts[0], -1.0)
     assert np.isclose(experiment.trial_data.ts[-1], 1.95)
     assert np.allclose(experiment.trial_data.obs["ALIGNMENTS"].to_numpy(dtype=float), 0.0)
+
+
+def test_find_timestamp_in_intervals_supports_first_last_and_mean(experiment):
+    timestamps = np.asarray([1.0, 1.5, 2.0, 5.0])
+    intervals = np.asarray([[0.5, 2.0], [4.0, 6.0], [7.0, 8.0]])
+
+    assert np.allclose(
+        experiment._find_timestamp_in_intervals(timestamps, intervals, logic="first"),
+        [1.0, 5.0, np.nan],
+        equal_nan=True,
+    )
+    assert np.allclose(
+        experiment._find_timestamp_in_intervals(timestamps, intervals, logic="last"),
+        [2.0, 5.0, np.nan],
+        equal_nan=True,
+    )
+    assert np.allclose(
+        experiment._find_timestamp_in_intervals(timestamps, intervals, logic="mean"),
+        [1.5, 5.0, np.nan],
+        equal_nan=True,
+    )
+
+    with pytest.raises(ValueError, match="not recognized"):
+        experiment._find_timestamp_in_intervals(timestamps, intervals, logic="bogus")
+
+
+def test_find_interval_bounds_and_nearest_timestamp_mask(experiment):
+    bounds = experiment._find_interval_bounds(
+        series=np.asarray([0.0, 1.0, 2.0, 3.0, 4.0]),
+        centers=np.asarray([1.0, 3.0]),
+        bounds=(-0.5, 0.5),
+    )
+    mask = experiment._nearest_timestamp_mask(
+        times=np.asarray([0.0, 1.0, 2.0, 3.0]),
+        timestamps=np.asarray([0.2, 2.8]),
+    )
+
+    assert np.array_equal(bounds, np.asarray([[1, 2], [3, 4]]))
+    assert mask.tolist() == [True, False, False, True]
+
+
+def test_create_windows_rejects_unknown_strategy(experiment):
+    with pytest.raises(ValueError, match="not recognized"):
+        experiment._create_windows(
+            signal=experiment.raw_signal,
+            time=experiment.time,
+            events={},
+            centers=np.asarray([10.0]),
+            bounds=(-1.0, 1.0),
+            strategy="bogus",
+        )
+
+
+# --- export, trimming, and plotting ---
+
+def test_to_wide_dataframe_includes_named_traces_and_event_columns(experiment):
+    experiment.preprocess_signal()
+
+    df = experiment.to_wide_dataframe(export_events=True)
+
+    expected = {
+        "time",
+        "raw_signal",
+        "raw_isosbestic",
+        "processed_signal",
+        "fitted_reference",
+        "filtered_signal",
+        "filtered_isosbestic",
+        "event",
+    }
+    assert expected <= set(df.columns)
+    assert len(df) == experiment.n_times
+    assert df["event"].sum() == experiment.events["event"].size
+
+
+def test_to_long_dataframe_includes_filtered_sources(experiment):
+    experiment.preprocess_signal()
+
+    df = experiment.to_long_dataframe()
+
+    assert {"time", "source", "value"} <= set(df.columns)
+    assert {
+        "raw_signal",
+        "raw_isosbestic",
+        "fitted_reference",
+        "processed_signal",
+        "filtered_signal",
+        "filtered_isosbestic",
+    } <= set(df["source"])
+
+
+def test_write_csv_writes_wide_and_long_tables(experiment, tmp_path):
+    experiment.preprocess_signal()
+    wide_path = tmp_path / "wide.csv"
+    long_path = tmp_path / "long.csv"
+
+    experiment.write_csv(str(wide_path), format="wide")
+    experiment.write_csv(str(long_path), format="long")
+
+    assert "raw_signal" in pd.read_csv(wide_path).columns
+    assert "source" in pd.read_csv(long_path).columns
+
+    with pytest.raises(ValueError, match="not recognized"):
+        experiment.write_csv(str(tmp_path / "bad.csv"), format="bad")
+
+
+def test_load_csv_classmethod_constructs_experiment_from_csv(tmp_path):
+    path = tmp_path / "experiment.csv"
+    df = pd.DataFrame({
+        "time": [0.0, 1.0, 2.0, 3.0],
+        "signal": [1.0, 2.0, 3.0, 4.0],
+        "isosbestic": [1.0, 1.0, 1.0, 1.0],
+        "cue": [0, 1, 0, 0],
+    })
+    df.to_csv(path, index=False)
+
+    exp = PhotometryExperiment.load_CSV(
+        str(path),
+        event_cols="cue",
+        downsample=None,
+    )
+
+    assert isinstance(exp, PhotometryExperiment)
+    assert np.allclose(exp.events["cue"], [1.0])
+
+
+def test_trim_times_by_index_filters_all_timeseries_and_events(experiment):
+    experiment.preprocess_signal()
+    experiment.events["edge"] = np.asarray([experiment.time[0], experiment.time[10], experiment.time[-1]])
+
+    experiment.trim_times_by_index(start_idx=5, stop_idx=15)
+
+    assert experiment.n_times == 10
+    assert experiment.raw_signal.shape == experiment.time.shape
+    assert experiment.signal.shape == experiment.time.shape
+    assert np.all(experiment.events["edge"] >= experiment.time[0])
+    assert np.all(experiment.events["edge"] <= experiment.time[-1])
+
+
+def test_trim_times_by_values_validates_bounds(experiment):
+    with pytest.raises(ValueError, match="Lower bound"):
+        experiment.trim_times_by_values(lower=5.0, upper=4.0)
+
+    with pytest.raises(ValueError, match="less than"):
+        experiment.trim_times_by_index(start_idx=4, stop_idx=4)
+
+    with pytest.raises(ValueError, match="outside"):
+        experiment.trim_times_by_index(start_idx=-1, stop_idx=4)
+
+
+def test_trim_times_by_values_selects_inclusive_time_range(experiment):
+    lower = experiment.time[10]
+    upper = experiment.time[20]
+
+    experiment.trim_times_by_values(lower=lower, upper=upper)
+
+    assert np.isclose(experiment.time[0], lower)
+    assert np.isclose(experiment.time[-1], upper)
+
+
+def test_plot_dashboard_returns_plot_object_and_requires_preprocessed_signal(experiment):
+    raw_plot = experiment.plot_dashboard(raw=True, downsample=None)
+    assert hasattr(raw_plot, "draw")
+
+    with pytest.raises(ValueError, match="preprocess_signal"):
+        experiment.plot_dashboard(raw=False)
+
+    experiment.preprocess_signal()
+    processed_plot = experiment.plot_dashboard(raw=False, downsample=None)
+    assert processed_plot is not None

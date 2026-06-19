@@ -1,4 +1,4 @@
-# pyFiberPhotometry
+# PhoPro
 
 *A Python package for extendable and flexible processing and analysis of behavior-coupled fiber photometry experiments.*
 
@@ -16,7 +16,7 @@ This package provides extensive functionaly for processing, handling, analyzing,
 
 With another module for simulating photometry data:
 
-* **[SimulatedPhotometryGenerator](api/SimulatedPhotometryGenerator.md)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
+* **[SimulatedPhotometry](sim/SimulatedPhotometry.md)** - a class for simulating complex photometry traces including realistic photobleaching, movement artifacts, and custom event dynamics.
 
 ## Installation
 You can install directly from GitHub using the command:
@@ -30,7 +30,7 @@ See the [Installation](installation.md) page for more details.
 
 If you use this package in your work, and want to support the package, use the citation below (a proper publication is hopefully on the horizon):
 
-* Golde G. *pyFiberPhotometry: Python toolkit for simulating, processing, handling, and analyzing fiber photometry data*.
+* Golde G. *PhoPro: Python toolkit for simulating, processing, handling, and analyzing fiber photometry data*.
 GitHub repository. Version 0.1.0. Available at: https://github.com/ggolde/pyFiberPhotometry.
 
 Additionally, if you used the FMM module, please review the [recommended reference(s)](https://github.com/gloewing/photometry_FLMM/blob/main/README.md#references) for the ``fast-fmm-rpy2`` package.
