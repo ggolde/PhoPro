@@ -38,6 +38,7 @@ dependencies = [
 dev = [
   "pytest",
   "mkdocs-material",
+  "mkdocstrings",
   "nbconvert",
   "twine",
 ]
