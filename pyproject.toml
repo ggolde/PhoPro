@@ -14,6 +14,10 @@ authors = [
   { name = "Griffin Golde", email = "ggolde@ufl.edu" }
 ]
 
+keywords = [
+  "fiber photometry", "photometry", "neuroscience", "analysis",
+]
+
 dependencies = [
   "numpy",
   "pandas",
@@ -25,9 +29,17 @@ dependencies = [
   "statsmodels",
   "scikit-learn",
   "tdt",
-  "pytest",
   "pyyaml",
   "plotnine",
+  "pingouin",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "mkdocs-material",
+  "nbconvert",
+  "twine",
 ]
 
 [project.urls]

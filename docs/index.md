@@ -1,6 +1,6 @@
 # PhoPro: object-oriented photometry processing in Python
 
-*A comprehensive toolkit for the processing, analysis, and simulation of fiber photometry data.*
+*A comprehensive toolkit for the processing, analysis, and simulation of fiber photometry data ([GitHub](https://github.com/ggolde/PhoPro)).*
 
 ## Overview
 This package provides extensive functionaly for processing, handling, analyzing, and bulk processing fiber photometry datasets while remaining highly customizable. The high level APIs only require basic programming experience. It is built around 4 cores modules:
@@ -39,7 +39,7 @@ The currently avaliable tutorials are:
 
 * [Batch Processing](tutorials/Batch%20Processing.md) - detailed guide on how to use the ``PhotometryPipeline`` class for bulk processing (WIP).
 
-Some tutorials are still a work-in-progress.
+They are also avaliable as interactive Jupyter Notebooks [here](https://github.com/ggolde/PhoPro/tree/main/tutorials). Some tutorials are still a work-in-progress and will be updated.
 
 ## License
 

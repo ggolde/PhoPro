@@ -1,5 +1,4 @@
 # **PhoPro**
-## Object-oriented photometry processing in Python
 
 *A comprehensive toolkit for the processing, analysis, and simulation of fiber photometry data*
 

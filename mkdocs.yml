@@ -75,8 +75,8 @@ nav:
   - Tutorials:
       - Introduction: tutorials/Introduction.md
       - Simulating Photometry: "tutorials/Simulating Photometry.md"
-      - Signal Processing: "tutorials/Signal Processing"
-      - Data Handling & Analysis: "tutorials/Data Handling and Analysis"
+      - Signal Processing: "tutorials/Signal Processing.md"
+      - Data Handling & Analysis: "tutorials/Data Handling and Analysis.md"
       - Batch Processing: "tutorials/Batch Processing.md"
   - PhoPro:
     - Core:
