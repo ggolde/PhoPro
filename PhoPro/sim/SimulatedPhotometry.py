@@ -19,6 +19,8 @@ from .kernels import(
     alpha_kernel,
     diff_of_exp_kernel,
     sum_of_exp_kernel,
+    smooth_trapezoid_kernel,
+    domed_trapezoid_kernel,
 )
 
 from .layers import (
@@ -140,6 +142,7 @@ class SimulatedPhotometry:
 
             seed: int | None = 42,
             iso_event_leakage: float | None = None,
+            max_event_duration_sec: float = 1000.0,
             ) -> Self:
         """Construct a simulator from parameter dictionaries and scalars.
 
@@ -203,6 +206,9 @@ class SimulatedPhotometry:
             Random seed used when rendering stochastic layers.
         iso_event_leakage : float or None, default=None
             Fraction of the event trace mixed into the isosbestic channel.
+        max_event_duration_sec : float, default=1000.0
+            Max duration of event peaks before values are cutoff in seconds. 
+            A cutoff is required to generate finite kernels. 
 
         Returns
         -------
@@ -220,9 +226,10 @@ class SimulatedPhotometry:
 
         # events
         onsets = timebase.evenly_spaced_timestamps(n_events, event_buffer_sec, event_buffer_sec)
-        event_layer = EventLayer({
-            event_label : EventSpec(onsets, event_amplitude, event_kernel, event_kernel_params)
-        })
+        event_layer = EventLayer(
+            specs={event_label : EventSpec(onsets, event_amplitude, event_kernel, event_kernel_params)},
+            max_duration_sec=max_event_duration_sec,
+        )
 
         # bleaching
         bleaching_exp = PhotobleachingLayer(**bleaching_params_exp)
@@ -580,7 +587,7 @@ class SimulatedPhotometry:
         return diff_of_exp_kernel(time, amplitude, tau_rise_sec, tau_decay_sec)
 
     @staticmethod
-    def sum_of_exp_kernel(
+    def kernel_sum_of_exp(
             time: np.ndarray,
             amplitude: float = 1.0,
             tau_fast_sec: float = 1.0,
@@ -635,6 +642,50 @@ class SimulatedPhotometry:
             Kernel values evaluated at ``time``.
         """
         return gaussian_kernel(time, amplitude, center_sec, sigma_sec)
+    
+    @staticmethod 
+    def kernel_domed_trapezoid(
+            time: np.ndarray,
+            amplitude: float,
+            rise_duration: float,
+            plateau_duration: float,
+            decay_duration: float,
+            dome_strength: float = 0.0,
+            ) -> np.ndarray:
+        """
+        Broad kernel with S-shaped rise, broad middle dome, and S-shaped decay.
+
+        Parameters
+        ----------
+        time : np.ndarray
+            Time points, in seconds.
+        amplitude : float
+            Peak height of dome region.
+        rise_duration : float
+            Duration of the S-shaped increase, in seconds.
+        plateau_duration : float
+            Duration of the broad middle region, in seconds.
+        decay_duration : float
+            Duration of the S-shaped decrease, in seconds.
+        dome_strength : float
+            Strength of curvature of middle "plateau" region.
+            Negative values are concave, positive are convex, 
+            and ``0`` is flat. Larger magnitudes are increase strength
+            of curvature.
+
+        Returns
+        -------
+        y : np.ndarray
+            Kernel values evaluated at ``time``.
+        """
+        return domed_trapezoid_kernel(
+            time, 
+            amplitude, 
+            rise_duration, 
+            plateau_duration, 
+            decay_duration, 
+            dome_strength,
+        )
 
     #endregion
 

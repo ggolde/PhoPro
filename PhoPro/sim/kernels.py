@@ -113,6 +113,16 @@ def taper_end_linear(y: np.ndarray, taper_fraction: float, side: Literal['left',
 
     return y
 
+def smootherstep(x: np.ndarray) -> np.ndarray:
+    """
+    Quintic smoothstep.
+
+    Maps x in [0, 1] to an S-curve in [0, 1] with zero first
+    and second derivatives at both endpoints.
+    """
+    x = np.clip(x, 0.0, 1.0)
+    return x**3 * (x * (x * 6 - 15) + 10)
+
 #endregion
 
 ################################
@@ -301,5 +311,122 @@ def gaussian_kernel(
     return amplitude * np.exp(
         -0.5 * ((time - center_sec) / sigma_sec) ** 2
     )
+
+def smooth_trapezoid_kernel(
+        time: np.ndarray,
+        amplitude: float,
+        rise_duration: float,
+        plateau_duration: float,
+        decay_duration: float,
+        ) -> np.ndarray:
+    """
+    Broad kernel with S-shaped rise, plateau, and S-shaped decay.
+
+    Parameters
+    ----------
+    time : np.ndarray
+        Time points, in seconds.
+    amplitude : float
+        Peak height of plateau.
+    rise_duration : float
+        Duration of the S-shaped increase, in seconds.
+    plateau_duration : float
+        Duration of the broad middle region, in seconds.
+    decay_duration : float
+        Duration of the S-shaped decrease, in seconds.
+
+    Returns
+    -------
+    y : np.ndarray
+        Kernel values evaluated at ``time``.
+    """
+    if rise_duration <= 0:
+        raise ValueError("rise_duration must be positive.")
+    if plateau_duration < 0:
+        raise ValueError("plateau_duration must be non-negative.")
+    if decay_duration <= 0:
+        raise ValueError("decay_duration must be positive.")
+
+    time = np.asarray(time)
+    y = np.zeros_like(time, dtype=float)
+
+    t0 = 0.0
+    t1 = rise_duration
+    t2 = rise_duration + plateau_duration
+    t3 = rise_duration + plateau_duration + decay_duration
+
+    # rise
+    rise_mask = (time >= t0) & (time < t1)
+    x_rise = (time[rise_mask] - t0) / rise_duration
+    y[rise_mask] = amplitude * smootherstep(x_rise)
+
+    # plateau
+    plateau_mask = (time >= t1) & (time < t2)
+    y[plateau_mask] = amplitude
+
+    # decay
+    decay_mask = (time >= t2) & (time <= t3)
+    x_decay = (time[decay_mask] - t2) / decay_duration
+    y[decay_mask] = amplitude * (1 - smootherstep(x_decay))
+
+    return y
+
+def domed_trapezoid_kernel(
+        time: np.ndarray,
+        amplitude: float,
+        rise_duration: float,
+        plateau_duration: float,
+        decay_duration: float,
+        dome_strength: float = 0.0,
+        ) -> np.ndarray:
+    """
+    Broad kernel with S-shaped rise, broad middle dome, and S-shaped decay.
+
+    Parameters
+    ----------
+    time : np.ndarray
+        Time points, in seconds.
+    amplitude : float
+        Peak height of dome region.
+    rise_duration : float
+        Duration of the S-shaped increase, in seconds.
+    plateau_duration : float
+        Duration of the broad middle region, in seconds.
+    decay_duration : float
+        Duration of the S-shaped decrease, in seconds.
+    dome_strength : float
+        Strength of curvature of middle "plateau" region.
+        Negative values are concave, positive are convex, 
+        and ``0`` is flat. Larger magnitudes are increase strength
+        of curvature.
+
+    Returns
+    -------
+    y : np.ndarray
+        Kernel values evaluated at ``time``.
+    """
+
+    y = smooth_trapezoid_kernel(
+        time=time,
+        rise_duration=rise_duration,
+        plateau_duration=plateau_duration,
+        decay_duration=decay_duration,
+        amplitude=1.0,
+    )
+
+    total_duration = rise_duration + plateau_duration + decay_duration
+    x = np.clip(time / total_duration, 0.0, 1.0)
+
+    # broad dome: 0 at edges, 1 at center
+    dome = 4 * x * (1 - x)
+
+    y = y * (1 + dome_strength * dome)
+
+    # re-normalize to requested amplitude
+    max_y = np.nanmax(y)
+    if max_y > 0:
+        y = amplitude * y / max_y
+
+    return y
 
 #endregion

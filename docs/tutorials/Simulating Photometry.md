@@ -25,6 +25,8 @@ Where:
 * $b=$ optical path length
 * $\mathbf{c}=$ **fluorophore concentation**
 
+The combination of $\phi_{F} \cdot \epsilon_{\lambda}$ can be thought of as the "molecular brightness".
+
 Generally, the fluorophore is engineered to have a distinct excitation wavelength when it is bound to its ligand. The general scheme is:
 
 $$
@@ -44,8 +46,8 @@ Where:
 
 An ideal fluorophore will have the following properties: 
 
-* At the *experimental* wavelength ($\lambda_{exp}$): $\quad \epsilon_{PL} \gg \epsilon_P$
-* At the *isosbestic* wavelength ($\lambda_{iso}$): $\quad \epsilon_{PL} = \epsilon_P$
+* At the *experimental* wavelength ($\lambda_{exp}$): $\quad \phi_{PL} \cdot \epsilon_{PL} \gg \phi_{P} \cdot \epsilon_P$
+* At the *isosbestic* wavelength ($\lambda_{iso}$): $\quad \phi_{PL} \cdot \epsilon_{PL} = \phi_{P} \cdot \epsilon_P$
 
 
 This means at $\lambda_{exp}$, $F(\lambda_{exp})$ is unaffected by the concentration of the unbound protein $[P]$. And at $\lambda_{iso}$, $F(\lambda_{iso})$ is agnostic to the concentration of the ligand $[L]$. This is why $F(\lambda_{iso})$ can be used to correct for photobleaching attenuation and other artifacts without the signal from the true changes in $[PL]$ and thus $[L]$.
@@ -142,7 +144,9 @@ And the **isosbestic trace** is calculated by:
 
 Where $\mathbf{B}$ and $\mathbf{N}$ are calculated seperately from the experimental trace and $\mathbf{A}$ is shared between experimental and isosbestic traces. 
 
-While the ideal isosbestic wavelength will not contain any neural trace, this package supports simulating a non-ideal isosbestic wavelength with the parameter $\text{c}_{\text{iso-leakage}}$ which controls how much the "true signal" leaks into the isosbestic trace.
+While the ideal isosbestic wavelength will not contain any neural trace, this package supports simulating a non-ideal isosbestic wavelength with the parameter ``iso_event_leakage`` which controls how much the "true signal" leaks into the isosbestic trace. It is roughly equivalent to $\phi_{PL} \cdot \epsilon_{PL} - \phi_{P} \cdot \epsilon_P$ at the isosobestic wavelength. 
+
+If ``iso_event_leakage == 0``, the isosbestic wavelength is ideal and $[L]$ does not affect $F(\lambda_{iso})$. If``iso_event_leakage > 0``, the bound protein is "brighter" than the unbound protein at $\lambda_{iso}$ and a positive change in $[L]$, and thus $F(\lambda_{exp})$, causes a positive transient in $F(\lambda_{iso})$. Likewise, if ``iso_event_leakage < 0``, a positive change in $[L]$ causes a negative transient in $F(\lambda_{iso})$.
 
 # 3. Simulating Photometry
 
