@@ -2,33 +2,33 @@
 Follow the [base package](#base-package) installation below. Using the package manager [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/main) is highly recommened.
 
 ## Base package
-For a basic install there are 3 main options:
 
-1. Download and unzip the package repository and run the following command from the project's root folder:
-```
-pip install .
-```
-
-2. (Requires git) Create a new venv or conda enviroment and run:
-```
-pip install git+https://github.com/ggolde/PhoPro.git
-```
-
-3. (Requires conda) Download and unzip the package repository. In the terminal navigate to the project's root folder and run:
-```
-conda env create --name photometry --file=envs/basic_env.yml
-```
-
-Then activate your enviroment and install PhoPro through pip:
-```
+1. Create a [conda](https://www.geeksforgeeks.org/python/what-is-conda/) or [virtual enviroment](https://www.w3schools.com/python/python_virtualenv.asp) and activate it (optional, but recommended).
+```bash
+conda env create --name photometry python=3.11
 conda activate photometry
-pip install .
+```
+
+```bash
+python -m venv ./photometry_env
+source ./photometry_env/Scripts/activate # for MacOS / Linux
+photometry_env\Scripts\activate # for Windows
+```
+
+2. Install from PyPi or GitHub. Installing from GitHub will install the latest version.
+```bash
+pip install PhoPro
+```
+```bash
+pip install git+https://github.com/ggolde/PhoPro.git
 ```
 
 You can update the package with by including the ``--force-reinstall`` flag in the pip install command.
 
-## FLMM support (requires conda)
-Follow the next step after the basic installation to add support for the advanced analysis method [Functional Linear Mixed Modeling](https://github.com/gloewing/photometry_FLMM/) after installing the basic enviroment. The setup can be a pain but the FMM analysis framework can be very insightful. For more information about FMM for photometry data see the [original paper](https://doi.org/10.7554/eLife.95802.2) by Dr. Loewinger.
+## FMM support
+Follow the next step after the basic installation to add support for the advanced analysis method [Functional Linear Mixed Modeling](https://github.com/gloewing/photometry_FLMM/). It is highly recommended that you install PhoPro in a conda enviroment if you want FMM support. 
+
+The setup can be a pain but the FMM analysis framework can be very insightful. For more information about FMM for photometry data see the [original paper](https://doi.org/10.7554/eLife.95802.2) by Dr. Loewinger.
 
 1. Install all R packages avaliable from conda:
 ```
@@ -37,7 +37,7 @@ conda install -c conda-forge r-base=4.4.3 r-essentials
 conda install -c conda-forge r-lme4=1.1_35.5 r-mass=7.3_64 r-mvtnorm=1.2_6 r-gridextra=2.3 r-rfast=2.1.0 r-matrix=1.7_2 r-arrangements r-here r-devtools r-rcurl
 ```
 
-2. Then run the install_FLMM.R script with your conda enviroment active.
+2. Then run the [install_FLMM.R](https://github.com/ggolde/PhoPro/blob/main/envs/install_FLMM.R) script with your conda enviroment active.
 ```
 Rscript envs/install_FLMM.R
 ```

@@ -27,7 +27,12 @@ Documentation for this package can be found [here](https://ggolde.github.io/PhoP
 ---
 
 ## Installation
-You can install directly from GitHub using the command:
+You can now install through PyPi:
+```
+pip install PhoPro
+```
+
+Or you can install directly from GitHub using the command:
 ```
 pip install git+https://github.com/ggolde/PhoPro.git
 ```
@@ -58,6 +63,6 @@ This package is developed and used internally at the [Bizon-Setlow Lab](https://
 If you use this package in your work, and want to support the package, use the citation below (a proper publication is hopefully on the horizon):
 
 * Golde G. *PhoPro: Python toolkit for simulating, processing, handling, and analyzing fiber photometry data*.
-GitHub repository. Version 0.2.0. Available at: https://github.com/ggolde/PhoPro.
+GitHub repository. Version 0.5.0. Available at: https://github.com/ggolde/PhoPro.
 
 Additionally, if you used the FMM module, please review the [recommended reference(s)](https://github.com/gloewing/photometry_FLMM/blob/main/README.md#references) for the ``fast-fmm-rpy2`` package.
