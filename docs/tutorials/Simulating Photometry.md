@@ -146,11 +146,11 @@ And the **isosbestic trace** is calculated by:
 
 Where $\mathbf{B}$ and $\mathbf{N}$ are calculated seperately from the experimental trace and $\mathbf{A}$ is shared between experimental and isosbestic traces. 
 
+Note that $(\mathbf{E} + \mathbf{D})$ is scaled by $(\mathbf{B} - \mathbf{B_{t\rightarrow \infty}})$ not just $\mathbf{B}$. This is because the simulation assumes that the source of background fluorecence is not the target fluorophore. With this scaling term it assumes that as $t \rightarrow \infty$, the concentration of unbleached fluorophore $\rightarrow 0$ and, thus $(\mathbf{E} + \mathbf{D}) \rightarrow 0$.
 
+While the ideal isosbestic wavelength will not contain any neural trace, this package supports simulating a non-ideal isosbestic wavelength with the parameter ``iso_event_leakage`` which controls how much the "true signal" leaks into the isosbestic trace. It is $\propto \phi_{PL} \cdot \epsilon_{PL} - \phi_{P} \cdot \epsilon_P$ at the isosobestic wavelength. 
 
-While the ideal isosbestic wavelength will not contain any neural trace, this package supports simulating a non-ideal isosbestic wavelength with the parameter ``iso_event_leakage`` which controls how much the "true signal" leaks into the isosbestic trace. It is roughly equivalent to $\phi_{PL} \cdot \epsilon_{PL} - \phi_{P} \cdot \epsilon_P$ at the isosobestic wavelength. 
-
-If ``iso_event_leakage == 0``, the isosbestic wavelength is ideal and $[L]$ does not affect $F(\lambda_{iso})$. If``iso_event_leakage > 0``, the bound protein is "brighter" than the unbound protein at $\lambda_{iso}$ and a positive change in $[L]$, and thus $F(\lambda_{exp})$, causes a positive transient in $F(\lambda_{iso})$. Likewise, if ``iso_event_leakage < 0``, a positive change in $[L]$ causes a negative transient in $F(\lambda_{iso})$.
+If ``iso_event_leakage == 0``, the isosbestic wavelength is "ideal" and $F(\lambda_{iso})$ is $[L]$ agnostic. If``iso_event_leakage > 0``, the bound protein is "brighter" than the unbound protein at $\lambda_{iso}$ and a positive change in $[L]$, and thus $F(\lambda_{exp})$, causes a positive transient in $F(\lambda_{iso})$. Likewise, if ``iso_event_leakage < 0``, a positive change in $[L]$ causes a negative transient in $F(\lambda_{iso})$.
 
 # 3. Simulating Photometry
 
@@ -234,7 +234,7 @@ sim.plot_layers(condensed=False)
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_15_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_16_0.png)
     
 
 
@@ -249,7 +249,7 @@ sim.plot_layers(condensed=True)
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_16_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_17_0.png)
     
 
 
@@ -266,7 +266,7 @@ sim.plot_traces()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_18_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_19_0.png)
     
 
 
@@ -334,13 +334,13 @@ plot_gamma_across_taus()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_20_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_21_0.png)
     
 
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_20_1.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_21_1.png)
     
 
 
@@ -385,7 +385,7 @@ sim.plot_layers()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_22_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_23_0.png)
     
 
 
@@ -453,7 +453,7 @@ sim.plot_layers()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_24_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_25_0.png)
     
 
 
@@ -515,7 +515,7 @@ recovered_signal.plot_trials()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_28_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_29_0.png)
     
 
 
@@ -530,7 +530,7 @@ true_signal.plot_trials()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_29_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_30_0.png)
     
 
 
@@ -643,12 +643,12 @@ sim.plot_traces().show()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_34_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_35_0.png)
     
 
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_34_1.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_35_1.png)
     
 
