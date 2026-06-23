@@ -46,8 +46,10 @@ class SimulatedPhotometry:
             bleaching_exp: PhotobleachingLayer,
             bleaching_iso: PhotobleachingLayer,
             event_layer: EventLayer,
-            noise_shot: NoiseShotLayer,
-            noise_gaussian: NoiseGaussianLayer,
+            noise_shot_exp: NoiseShotLayer,
+            noise_shot_iso: NoiseShotLayer,
+            noise_gaussian_exp: NoiseGaussianLayer,
+            noise_gaussian_iso: NoiseGaussianLayer,
             dynamic_noise: NeuralDynamicNoiseLayer,
             movement: MovementAttenuationLayer,
             artifact_spike: ArtifactSpikeLayer,
@@ -68,10 +70,14 @@ class SimulatedPhotometry:
             Photobleaching layer for the isosbestic channel.
         event_layer : EventLayer
             Event layer rendered into the experimental channel.
-        noise_shot : NoiseShotLayer
-            Shot-noise layer.
-        noise_gaussian : NoiseGaussianLayer
-            Additive Gaussian noise layer.
+        noise_shot_exp : NoiseShotLayer
+            Shot-noise layer in the experimental channel.
+        noise_shot_iso : NoiseShotLayer
+            Shot-noise layer in the isosbestic channel.
+        noise_gaussian_exp : NoiseGaussianLayer
+            Additive Gaussian noise layer in experimental channel.
+        noise_gaussian_iso : NoiseGaussianLayer
+            Additive Gaussian noise layer in isosbestic channel.
         movement : MovementAttenuationLayer
             Multiplicative movement attenuation layer.
         artifact_spike : ArtifactSpikeLayer
@@ -86,12 +92,19 @@ class SimulatedPhotometry:
         """
         # layers
         self.timebase = timebase
+
         self.bleaching_exp = bleaching_exp
         self.bleaching_iso = bleaching_iso
+        
         self.event_layer = event_layer
-        self.noise_shot = noise_shot
-        self.noise_gaussian = noise_gaussian
         self.dynamic_noise = dynamic_noise
+
+        self.noise_shot_exp = noise_shot_exp
+        self.noise_shot_iso = noise_shot_iso
+
+        self.noise_gaussian_exp = noise_gaussian_exp
+        self.noise_gaussian_iso = noise_gaussian_iso
+        
         self.movement = movement
         self.artifact_spike = artifact_spike
         self.artifact_jump = artifact_jump
@@ -122,8 +135,11 @@ class SimulatedPhotometry:
             iso_bleach_scale: float | None = 0.8,
             iso_bleach_offset: float | None = None,
 
-            photons_per_unit: int | None = 1e5,
-            gaussian_noise_scale: float | None = 0.2,
+            photons_per_unit_exp: int | None = 1e5,
+            photons_per_unit_iso: int | None = None,
+
+            gaussian_noise_scale_exp: float | None = 0.2,
+            gaussian_noise_scale_iso: float | None = None,
 
             dynamic_noise_amplitude: float | None = None,
             dynamic_noise_center: float = 0.0,
@@ -175,10 +191,16 @@ class SimulatedPhotometry:
         iso_bleach_offset : float or None, default=None
             Offset applied to experimental bleaching parameters when building
             the isosbestic layer.
-        photons_per_unit : int or None, default=1e5
-            Photon-count scale for shot noise.
-        gaussian_noise_scale : float or None, default=0.2
-            Standard deviation of additive Gaussian noise.
+        photons_per_unit_exp : int or None, default=1e5
+            Photon-count scale for shot noise in the experimental channel.
+        photons_per_unit_iso : int or None, default=None
+            Photon-count scale for shot noise in the isosbestic channel.
+            If ``None``, it is set equal to ``photons_per_unit_exp``.
+        gaussian_noise_scale_exp : float or None, default=0.2
+            Standard deviation of additive Gaussian noise in the experimental channel.
+        gaussion_noise_scale_iso : float or None, default=None
+            Standard deviation of additive Gaussian noise in the isosbestic channel.
+            If ``None``, it is set equal to ``gaussian_noise_scale_exp``.
         dynamic_noise_amplitude : float or None, default=None
             Standard deviation of random neural dynamic noise.
         dynamic_noise_center : float, default=0.0
@@ -245,9 +267,15 @@ class SimulatedPhotometry:
         else:
             raise ValueError('One of bleaching_params_iso or (iso_bleach_scale | iso_bleach_offset) has to be be specified')
 
-        # noise
-        noise_shot = NoiseShotLayer(photons_per_unit)
-        noise_gaussian = NoiseGaussianLayer(gaussian_noise_scale)
+        # shot noise
+        photons_per_unit_iso = photons_per_unit_exp if photons_per_unit_iso is None else photons_per_unit_iso
+        noise_shot_exp = NoiseShotLayer(photons_per_unit_exp)
+        noise_shot_iso = NoiseShotLayer(photons_per_unit_iso)
+
+        # gaussian noise
+        gaussian_noise_scale_iso = gaussian_noise_scale_exp if gaussian_noise_scale_iso is None else gaussian_noise_scale_iso
+        noise_gaussian_exp = NoiseGaussianLayer(gaussian_noise_scale_exp)
+        noise_gaussian_iso = NoiseGaussianLayer(gaussian_noise_scale_iso)
 
         dynamic_noise = NeuralDynamicNoiseLayer(
             dynamic_noise_amplitude,
@@ -274,8 +302,10 @@ class SimulatedPhotometry:
             bleaching_exp=bleaching_exp,
             bleaching_iso=bleaching_iso,
             event_layer=event_layer,
-            noise_shot=noise_shot,
-            noise_gaussian=noise_gaussian,
+            noise_shot_exp=noise_shot_exp,
+            noise_shot_iso=noise_shot_iso,
+            noise_gaussian_exp=noise_gaussian_exp,
+            noise_gaussian_iso=noise_gaussian_iso,
             dynamic_noise=dynamic_noise,
             movement=movement,
             artifact_spike=artifact_spike,
@@ -297,6 +327,8 @@ class SimulatedPhotometry:
         ----------
         seed : int or None, default=None
             Optional seed overriding ``self.seed`` for this render.
+            Recalls with the same seed will produce identical RNG-based 
+            layers.
         """
         # make rng locally for repeatability
         seed = self.seed if seed is None else seed
@@ -318,31 +350,35 @@ class SimulatedPhotometry:
         self.D = self.dynamic_noise.render(self.time, self.freq, rng)
         self.D_iso = self.iso_event_leakage * self.D
 
+        # clean traces
+        self.neural_trace_exp = self.E + self.D
+        self.neural_trace_iso = self.E_iso + self.D_iso
+
+        self.clean_exp = (self.B_exp - self.bleaching_exp.B_floor) * self.neural_trace_exp + self.B_exp
+        self.clean_iso = (self.B_iso - self.bleaching_iso.B_floor) * self.neural_trace_iso + self.B_iso
+
         # artifacts
         self.M = self.movement.render(self.time, self.freq, rng)
         self.AS = self.artifact_spike.render(self.time, self.freq, rng)
         self.AJ = self.artifact_jump.render(self.time, self.freq, rng)
         self.A = self.M * self.AS * self.AJ
 
-        # clean traces
-        self.neural_trace_exp = self.E + self.D
-        self.neural_trace_iso = self.E_iso + self.D_iso
-
-        self.clean_exp = (self.B_exp * self.neural_trace_exp + self.B_exp) * self.A
-        self.clean_iso = (self.B_iso * self.neural_trace_iso + self.B_iso) * self.A
+        # noiseless trace
+        noiseless_exp = self.clean_exp * self.A
+        noiseless_iso = self.clean_iso * self.A
 
         # noise
-        self.N_shot_exp = self.noise_shot.render(self.clean_exp, rng)
-        self.N_gauss_exp = self.noise_gaussian.render(self.time, rng)
+        self.N_shot_exp = self.noise_shot_exp.render(noiseless_exp, rng)
+        self.N_gauss_exp = self.noise_gaussian_exp.render(self.time, rng)
         self.N_exp = self.N_shot_exp + self.N_gauss_exp
 
-        self.N_shot_iso = self.noise_shot.render(self.clean_iso, rng)
-        self.N_gauss_iso = self.noise_gaussian.render(self.time, rng)
+        self.N_shot_iso = self.noise_shot_iso.render(noiseless_iso, rng)
+        self.N_gauss_iso = self.noise_gaussian_iso.render(self.time, rng)
         self.N_iso = self.N_shot_iso + self.N_gauss_iso
 
         # composite final signal
-        self.F_exp = self.clean_exp + self.N_exp
-        self.F_iso = self.clean_iso + self.N_iso
+        self.F_exp = noiseless_exp + self.N_exp
+        self.F_iso = noiseless_iso + self.N_iso
 
     #endregion
 

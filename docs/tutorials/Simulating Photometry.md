@@ -90,14 +90,14 @@ This package simulates photometry traces by modeling the above components of pho
 ``TimeBase``: is used to create the time series of the traces.
 
 1. **Neural trace, the "true signal"**
-    * ``EventLayer`` ($\mathbf{E}$): the true neural signals in response to event stimuli.
+    * ``EventLayer`` ($\mathbf{E}$): fractional fluorescence changes relative to local baseline caused by changes in $[L]$ in response to input events. This can be thought of as the "true signal" we aim to recover.
 
-    * ``NeuralDynamicNoiseLayer`` ($\mathbf{D}$): the noise in the true fluctuation of $[L]$, usually of a lower frequency than the sampling frequency.
+    * ``NeuralDynamicNoiseLayer`` ($\mathbf{D}$): also fractional fluorescence changes relative to local baseline caused by changes in $[L]$, but not in response to any events. This can be thought of as the "true noise" in the signal we aim to recover. Generally it is of a much lower frequency than the sampling frequency.
 
 <br>
 
 2. **Photobleaching attenuation** & 6. **background autofluorecence**
-    * ``PhotobleachingLayer`` ($\mathbf{B}$): models photobleaching with a negative bi-exponential equation that also captures background autofluorecence in ($\beta_{\text{floor}}$):
+    * ``PhotobleachingLayer`` ($\mathbf{B}$): models photobleaching with a negative bi-exponential equation (see below) that also captures background autofluorecence as $\beta_{\text{floor}}$, i.e. $\mathbf{B(t \rightarrow \infty)}$.
 
 $$
 \alpha_{1} e^{-t / \tau_1} + \alpha_2 e^{-t / \tau_2} + \beta_{\text{floor}}
@@ -122,27 +122,31 @@ $$
 
     * ``ArtifactJumpLayer`` ($\mathbf{AJ}$): sharp changes in the baseline value of signal for an extended period, which have been observed in real data.
 
+    * All serve as a multiplicative mask on fluorecence, i.e. they are $\ge 0$ and centered on $1$.
+
 Then the **experimental trace** is calculated by:
 
-* $\text{Clean Trace} \, (\mathbf{C}) = \mathbf{B} \cdot (\mathbf{E} + \mathbf{D}) + \mathbf{B}$
+* $\text{Clean Trace} \, (\mathbf{C}) = (\mathbf{B} - \mathbf{B_{t\rightarrow \infty}}) \cdot (\mathbf{E} + \mathbf{D}) + \mathbf{B}$
 
 * $\text{Artifact} \, (\mathbf{A}) = \mathbf{M} \cdot \mathbf{AS} \cdot \mathbf{AJ}$
 
-* $\text{Noise} \, (\mathbf{N}) = \mathbf{N_g} + \mathbf{N_s}(\mathbf{C})$
+* $\text{Noise} \, (\mathbf{N}) = \mathbf{N_g} + \mathbf{N_s}(\mathbf{C \cdot A})$
 
 * $F(\lambda_{exp}) = \mathbf{C} \cdot \mathbf{A} + \mathbf{N}$
 
 And the **isosbestic trace** is calculated by:
 
-* $\text{Clean Trace} \, (\mathbf{C_{iso}}) = \mathbf{B_{iso}} \cdot \text{c}_{\text{iso-leakage}} (\mathbf{E} + \mathbf{D}) + \mathbf{B_{iso}}$
+* $\text{Clean Trace} \, (\mathbf{C_{iso}}) = (\mathbf{B_{iso}} - \mathbf{B_{iso,t\rightarrow \infty}}) \cdot \text{c}_{\text{iso-leakage}} (\mathbf{E} + \mathbf{D}) + \mathbf{B_{iso}}$
 
 * $\text{Artifact} \, (\mathbf{A}) = \mathbf{M} \cdot \mathbf{AS} \cdot \mathbf{AJ}$
 
-* $\text{Noise} \, (\mathbf{N_{iso}}) = \mathbf{N_{g,iso}} + \mathbf{N_{s,iso}}(\mathbf{C_{iso}})$
+* $\text{Noise} \, (\mathbf{N_{iso}}) = \mathbf{N_{g,iso}} + \mathbf{N_{s,iso}}(\mathbf{C_{iso} \cdot A})$
 
 * $F(\lambda_{iso}) = \mathbf{C_{iso}} \cdot \mathbf{A} + \mathbf{N_{iso}}$
 
 Where $\mathbf{B}$ and $\mathbf{N}$ are calculated seperately from the experimental trace and $\mathbf{A}$ is shared between experimental and isosbestic traces. 
+
+
 
 While the ideal isosbestic wavelength will not contain any neural trace, this package supports simulating a non-ideal isosbestic wavelength with the parameter ``iso_event_leakage`` which controls how much the "true signal" leaks into the isosbestic trace. It is roughly equivalent to $\phi_{PL} \cdot \epsilon_{PL} - \phi_{P} \cdot \epsilon_P$ at the isosobestic wavelength. 
 
@@ -187,10 +191,14 @@ sim = SimulatedPhotometry.from_parameters(
     attenuation_cutoff_hz=0.1,
 
     # magnitude of the Ns layer
-    photons_per_unit=1e4,
+    photons_per_unit_exp=1e4,
+    # when iso param is None, it default to exp value
+    photons_per_unit_iso=None,
 
     # magnitude of the Ng layer
-    gaussian_noise_scale=0.2,
+    gaussian_noise_scale_exp=0.2,
+    # when iso param is None, it default to exp value
+    gaussian_noise_scale_iso=None,
 
     # magnitude, offset, and frequency of the D layer
     dynamic_noise_amplitude=0.001,
@@ -226,7 +234,7 @@ sim.plot_layers(condensed=False)
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_14_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_15_0.png)
     
 
 
@@ -241,7 +249,7 @@ sim.plot_layers(condensed=True)
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_15_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_16_0.png)
     
 
 
@@ -258,7 +266,7 @@ sim.plot_traces()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_17_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_18_0.png)
     
 
 
@@ -326,13 +334,13 @@ plot_gamma_across_taus()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_19_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_20_0.png)
     
 
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_19_1.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_20_1.png)
     
 
 
@@ -377,7 +385,7 @@ sim.plot_layers()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_21_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_22_0.png)
     
 
 
@@ -445,7 +453,7 @@ sim.plot_layers()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_23_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_24_0.png)
     
 
 
@@ -507,7 +515,7 @@ recovered_signal.plot_trials()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_27_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_28_0.png)
     
 
 
@@ -522,7 +530,7 @@ true_signal.plot_trials()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_28_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_29_0.png)
     
 
 
@@ -552,8 +560,8 @@ print(
 )
 ```
 
-    RMSD = 0.0024 +/- 0.0007
-    MAE = 0.0019 +/- 0.0006
+    RMSD = 0.0028 +/- 0.0008
+    MAE = 0.0022 +/- 0.0007
 
 
 By comparing the error metrics of multiple different preprocessing methods we can better understand what methods are most accurate for different types of real-world data.
@@ -582,8 +590,8 @@ sim = SimulatedPhotometry.from_parameters(
     movement_attenuation=0.5,
     attenuation_cutoff_hz=0.1,
 
-    photons_per_unit=1e4,
-    gaussian_noise_scale=0.5,
+    photons_per_unit_exp=1e4,
+    gaussian_noise_scale_exp=0.5,
 
     dynamic_noise_amplitude=0.004,
     dynamic_noise_center=0.0,
@@ -635,12 +643,12 @@ sim.plot_traces().show()
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_33_0.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_34_0.png)
     
 
 
 
     
-![png](Simulating%20Photometry_files/Simulating%20Photometry_33_1.png)
+![png](Simulating%20Photometry_files/Simulating%20Photometry_34_1.png)
     
 

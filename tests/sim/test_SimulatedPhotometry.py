@@ -18,7 +18,8 @@ def make_small_sim(seed=11):
         event_kernel_params={"tau_sec": 0.25},
         event_amplitude=0.05,
         iso_bleach_scale=1.0,
-        gaussian_noise_scale=0.05,
+        gaussian_noise_scale_exp=0.05,
+        gaussian_noise_scale_iso=None,
         movement_attenuation=0.2,
         n_spike_artifacts=0,
         n_jump_artifacts=0,
@@ -87,7 +88,7 @@ def test_kernel_static_methods_return_expected_shape():
         SimulatedPhotometry.kernel_exp_deacy(time, amplitude=1.0, tau_sec=0.2),
         SimulatedPhotometry.kernel_alpha(time, amplitude=1.0, tau_sec=0.2),
         SimulatedPhotometry.kernel_diff_of_exp(time, amplitude=1.0, tau_rise_sec=0.1, tau_decay_sec=0.4),
-        SimulatedPhotometry.sum_of_exp_kernel(time, amplitude=1.0, tau_fast_sec=0.1, tau_slow_sec=0.5, fast_weight=0.25),
+        SimulatedPhotometry.kernel_sum_of_exp(time, amplitude=1.0, tau_fast_sec=0.1, tau_slow_sec=0.5, fast_weight=0.25),
         SimulatedPhotometry.kernel_gaussian(time, amplitude=1.0, center_sec=0.5, sigma_sec=0.1),
     ]
 

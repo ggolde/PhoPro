@@ -1,3 +1,0 @@
-include README.md
-include LICENSE
-exclude_dir pyFiberPhotometry.egg-info

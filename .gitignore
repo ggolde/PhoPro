@@ -14,6 +14,6 @@ docs/tutorials/Basic_Usage_files
 utils_old/
 archive/
 workshop/
-_push_nb_to_docs.sh
 tutorials/output/*
 dist/
+sync_version.py

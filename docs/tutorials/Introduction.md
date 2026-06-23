@@ -31,6 +31,7 @@ First we need to import the necessary packages. If you have trouble importing an
 ```python
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from PhoPro import PhotometryExperiment, PhotometryData, PhotometryPipeline
 ```
@@ -254,8 +255,8 @@ exp.metadata
      'sex': 'male',
      'age': 'young',
      'reference_fit': {'type': 'isosbestic',
-      'r2_val': 0.9990783751778679,
-      'coeffs': array([-0.01397495,  1.25023965])},
+      'r2_val': 0.9993291237999945,
+      'coeffs': array([-0.00914491,  1.25010411])},
      'correction_method': 'dF/F'}
 
 
@@ -912,8 +913,6 @@ trials.obs.head(5)
 
 ```python
 # quick plot using pandas to compare differences in AUC_abs
-import mathplotlib.pyplot as plt
-
 trials.obs.plot(
     x='trial_label',
     y='AUC_abs',
@@ -1299,10 +1298,10 @@ trials.obs.head(5)
     <tr>
       <th>0</th>
       <td>1</td>
-      <td>-3.65</td>
+      <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>1.15</td>
+      <td>NaN</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
       <td>male</td>
@@ -1312,9 +1311,9 @@ trials.obs.head(5)
       <th>1</th>
       <td>2</td>
       <td>-2.70</td>
-      <td>NaN</td>
       <td>0.0</td>
       <td>NaN</td>
+      <td>1.25</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
       <td>male</td>
@@ -1335,8 +1334,8 @@ trials.obs.head(5)
     <tr>
       <th>3</th>
       <td>4</td>
-      <td>0.00</td>
-      <td>NaN</td>
+      <td>-3.95</td>
+      <td>0.0</td>
       <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
@@ -1347,9 +1346,9 @@ trials.obs.head(5)
     <tr>
       <th>4</th>
       <td>5</td>
-      <td>-2.50</td>
-      <td>NaN</td>
+      <td>-3.80</td>
       <td>0.0</td>
+      <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
@@ -1459,10 +1458,10 @@ trials.obs.head(5)
     <tr>
       <th>0</th>
       <td>1</td>
-      <td>-3.65</td>
+      <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>1.15</td>
+      <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
       <td>male</td>
@@ -1472,9 +1471,9 @@ trials.obs.head(5)
       <th>1</th>
       <td>2</td>
       <td>-2.70</td>
-      <td>NaN</td>
       <td>0.0</td>
       <td>NaN</td>
+      <td>1.25</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
       <td>male</td>
@@ -1495,8 +1494,8 @@ trials.obs.head(5)
     <tr>
       <th>3</th>
       <td>4</td>
-      <td>0.00</td>
-      <td>NaN</td>
+      <td>-3.95</td>
+      <td>0.0</td>
       <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
@@ -1507,9 +1506,9 @@ trials.obs.head(5)
     <tr>
       <th>4</th>
       <td>5</td>
-      <td>-2.50</td>
-      <td>NaN</td>
+      <td>-3.80</td>
       <td>0.0</td>
+      <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
@@ -1619,11 +1618,11 @@ trials.obs.head(5)
     <tr>
       <th>0</th>
       <td>1</td>
-      <td>-3.65</td>
+      <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>1.15</td>
-      <td>type3</td>
+      <td>NaN</td>
+      <td>type2</td>
       <td>exp1_animal_1</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
@@ -1634,10 +1633,10 @@ trials.obs.head(5)
       <th>1</th>
       <td>2</td>
       <td>-2.70</td>
-      <td>NaN</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>type1</td>
+      <td>1.25</td>
+      <td>type3</td>
       <td>exp1_animal_1</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
@@ -1661,11 +1660,11 @@ trials.obs.head(5)
     <tr>
       <th>3</th>
       <td>4</td>
-      <td>0.00</td>
+      <td>-3.95</td>
+      <td>0.0</td>
       <td>NaN</td>
       <td>NaN</td>
-      <td>NaN</td>
-      <td>NoResponse</td>
+      <td>type2</td>
       <td>exp1_animal_1</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
@@ -1675,11 +1674,11 @@ trials.obs.head(5)
     <tr>
       <th>4</th>
       <td>5</td>
-      <td>-2.50</td>
-      <td>NaN</td>
+      <td>-3.80</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>type1</td>
+      <td>NaN</td>
+      <td>type2</td>
       <td>exp1_animal_1</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>

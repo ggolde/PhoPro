@@ -214,19 +214,19 @@ static_trials.obs.head()
     <tr>
       <th>0</th>
       <td>1</td>
-      <td>-3.65</td>
+      <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>1.15</td>
+      <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
     </tr>
     <tr>
       <th>1</th>
       <td>2</td>
       <td>-2.70</td>
-      <td>NaN</td>
       <td>0.0</td>
       <td>NaN</td>
+      <td>1.25</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
     </tr>
     <tr>
@@ -241,8 +241,8 @@ static_trials.obs.head()
     <tr>
       <th>3</th>
       <td>4</td>
-      <td>0.00</td>
-      <td>NaN</td>
+      <td>-3.95</td>
+      <td>0.0</td>
       <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
@@ -250,9 +250,9 @@ static_trials.obs.head()
     <tr>
       <th>4</th>
       <td>5</td>
-      <td>-2.50</td>
-      <td>NaN</td>
+      <td>-3.80</td>
       <td>0.0</td>
+      <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
     </tr>
@@ -347,10 +347,10 @@ case1_trials.obs.head()
     <tr>
       <th>0</th>
       <td>1</td>
-      <td>-3.65</td>
+      <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>1.15</td>
+      <td>NaN</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
       <td>male</td>
@@ -360,9 +360,9 @@ case1_trials.obs.head()
       <th>1</th>
       <td>2</td>
       <td>-2.70</td>
-      <td>NaN</td>
       <td>0.0</td>
       <td>NaN</td>
+      <td>1.25</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
       <td>male</td>
@@ -383,8 +383,8 @@ case1_trials.obs.head()
     <tr>
       <th>3</th>
       <td>4</td>
-      <td>0.00</td>
-      <td>NaN</td>
+      <td>-3.95</td>
+      <td>0.0</td>
       <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
@@ -395,9 +395,9 @@ case1_trials.obs.head()
     <tr>
       <th>4</th>
       <td>5</td>
-      <td>-2.50</td>
-      <td>NaN</td>
+      <td>-3.80</td>
       <td>0.0</td>
+      <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case1/experiment_1/experiment_1.csv</td>
       <td>animal_1</td>
@@ -476,10 +476,10 @@ case2_trials.obs.head()
     <tr>
       <th>0</th>
       <td>1</td>
-      <td>-3.65</td>
+      <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>1.15</td>
+      <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
       <td>male</td>
@@ -489,9 +489,9 @@ case2_trials.obs.head()
       <th>1</th>
       <td>2</td>
       <td>-2.70</td>
-      <td>NaN</td>
       <td>0.0</td>
       <td>NaN</td>
+      <td>1.25</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
       <td>male</td>
@@ -512,8 +512,8 @@ case2_trials.obs.head()
     <tr>
       <th>3</th>
       <td>4</td>
-      <td>0.00</td>
-      <td>NaN</td>
+      <td>-3.95</td>
+      <td>0.0</td>
       <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
@@ -524,9 +524,9 @@ case2_trials.obs.head()
     <tr>
       <th>4</th>
       <td>5</td>
-      <td>-2.50</td>
-      <td>NaN</td>
+      <td>-3.80</td>
       <td>0.0</td>
+      <td>NaN</td>
       <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
@@ -658,7 +658,7 @@ fanout_trials.obs.head()
     <tr>
       <th>0</th>
       <td>1</td>
-      <td>-3.65</td>
+      <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
@@ -668,8 +668,8 @@ fanout_trials.obs.head()
       <th>1</th>
       <td>2</td>
       <td>-2.70</td>
-      <td>NaN</td>
       <td>0.0</td>
+      <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
     </tr>
@@ -685,8 +685,8 @@ fanout_trials.obs.head()
     <tr>
       <th>3</th>
       <td>4</td>
-      <td>0.00</td>
-      <td>NaN</td>
+      <td>-3.95</td>
+      <td>0.0</td>
       <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
@@ -694,9 +694,9 @@ fanout_trials.obs.head()
     <tr>
       <th>4</th>
       <td>5</td>
-      <td>-2.50</td>
-      <td>NaN</td>
+      <td>-3.80</td>
       <td>0.0</td>
+      <td>NaN</td>
       <td>data/pipeline/case2/experiment_1.csv</td>
       <td>animal_1</td>
     </tr>
@@ -873,18 +873,18 @@ no_metadata_trials.obs.head()
     <tr>
       <th>0</th>
       <td>1</td>
-      <td>-3.65</td>
+      <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
-      <td>1.15</td>
+      <td>NaN</td>
     </tr>
     <tr>
       <th>1</th>
       <td>2</td>
       <td>-2.70</td>
-      <td>NaN</td>
       <td>0.0</td>
       <td>NaN</td>
+      <td>1.25</td>
     </tr>
     <tr>
       <th>2</th>
@@ -897,17 +897,17 @@ no_metadata_trials.obs.head()
     <tr>
       <th>3</th>
       <td>4</td>
-      <td>0.00</td>
-      <td>NaN</td>
+      <td>-3.95</td>
+      <td>0.0</td>
       <td>NaN</td>
       <td>NaN</td>
     </tr>
     <tr>
       <th>4</th>
       <td>5</td>
-      <td>-2.50</td>
-      <td>NaN</td>
+      <td>-3.80</td>
       <td>0.0</td>
+      <td>NaN</td>
       <td>NaN</td>
     </tr>
   </tbody>
@@ -1008,36 +1008,36 @@ hook_trials.obs[['experiment_id', 'subject', 'processed_signal_mean', 'trial_lab
       <th>0</th>
       <td>animal_1_experiment_1</td>
       <td>animal_1</td>
-      <td>-0.000014</td>
-      <td>large_reward_shock</td>
+      <td>0.000039</td>
+      <td>large_reward_safe</td>
     </tr>
     <tr>
       <th>1</th>
       <td>animal_1_experiment_1</td>
       <td>animal_1</td>
-      <td>-0.000014</td>
-      <td>small_reward</td>
+      <td>0.000039</td>
+      <td>large_reward_shock</td>
     </tr>
     <tr>
       <th>2</th>
       <td>animal_1_experiment_1</td>
       <td>animal_1</td>
-      <td>-0.000014</td>
+      <td>0.000039</td>
       <td>no_response</td>
     </tr>
     <tr>
       <th>3</th>
       <td>animal_1_experiment_1</td>
       <td>animal_1</td>
-      <td>-0.000014</td>
-      <td>no_response</td>
+      <td>0.000039</td>
+      <td>large_reward_safe</td>
     </tr>
     <tr>
       <th>4</th>
       <td>animal_1_experiment_1</td>
       <td>animal_1</td>
-      <td>-0.000014</td>
-      <td>small_reward</td>
+      <td>0.000039</td>
+      <td>large_reward_safe</td>
     </tr>
   </tbody>
 </table>
@@ -1152,6 +1152,8 @@ print((low_memory_output_dir / 'trials.h5ad').exists())
 ```
 
     ... storing 'source' as categorical
+
+
     ... storing 'subject' as categorical
     ... storing 'sex' as categorical
     ... storing 'age' as categorical

@@ -85,7 +85,9 @@ class PhotobleachingLayer:
     offset: float | None = None
 
     def __post_init__(self) -> None:
-        """Validate photobleaching parameters."""
+        """Validate photobleaching parameters and apply scale and/or offset."""
+        self._apply_scale_offset()
+
         if self.tau1 <= 0:
             raise ValueError(f'tau1 must be positive, is {self.tau1}')
         if self.tau2 <= 0:
@@ -94,6 +96,15 @@ class PhotobleachingLayer:
             raise ValueError(f'B_floor must be positive, is {self.B_floor}')
         if self.alpha1 + self.alpha2 <= 0:
             raise ValueError(f'alpha1 + alpha2 must be positive, is {self.alpha1 + self.alpha2}')
+        
+    def _apply_scale_offset(self) -> None:
+        """Apply scale and offset once."""
+        if self.scale is not None:
+            self.alpha1 *= self.scale
+            self.alpha2 *= self.scale
+            self.B_floor *= self.scale
+        if self.offset is not None:
+            self.B_floor += self.offset
 
     def render(self, time: np.ndarray) -> np.ndarray:
         """Render the photobleaching baseline.
@@ -116,11 +127,6 @@ class PhotobleachingLayer:
         exp1 = self.alpha1 * np.exp(-time / self.tau1)
         exp2 = self.alpha2 * np.exp(-time / self.tau2)
         B = exp1 + exp2 + self.B_floor
-
-        if self.scale is not None:
-            B *= self.scale
-        if self.offset is not None:
-            B += self.offset
 
         if np.any(B <= 0):
             raise ValueError("Photobleaching baseline B must be strictly positive.")

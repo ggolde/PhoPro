@@ -17,8 +17,10 @@ def simulate_data() -> SimulatedPhotometry:
         event_label='event',
         n_events=12,
         iso_bleach_scale=1.0,
-        gaussian_noise_scale=None,
-        photons_per_unit=None,
+        gaussian_noise_scale_exp=None,
+        gaussian_noise_scale_iso=None,
+        photons_per_unit_exp=None,
+        photons_per_unit_iso=None,
         seed=7,
     )
     sim.add_event_relative_to(
