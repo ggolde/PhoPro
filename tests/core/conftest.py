@@ -4,7 +4,7 @@ import pathlib
 import pytest
 
 from PhoPro.core.PhotometryExperiment import PhotometryExperiment
-from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.core.PhotometryData import PhotometryData
 from PhoPro.core.PhotometryLoader import PhotometryLoader
 from PhoPro.core.PhotometryPipeline import PhotometryPipeline
 from PhoPro.sim.SimulatedPhotometry import SimulatedPhotometry

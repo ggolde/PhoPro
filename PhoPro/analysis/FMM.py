@@ -14,7 +14,7 @@ from plotnine import ggplot
 from ..utils import graphing
 
 if TYPE_CHECKING:
-    from ..core.PhotometeryData import PhotometryData
+    from ..core.PhotometryData import PhotometryData
 
 ############################
 #region --- RESULT CLASS ---

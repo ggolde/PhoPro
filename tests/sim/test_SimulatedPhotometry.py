@@ -1,6 +1,6 @@
 import numpy as np
 
-from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.core.PhotometryData import PhotometryData
 from PhoPro.core.PhotometryExperiment import PhotometryExperiment
 from PhoPro.sim.SimulatedPhotometry import SimulatedPhotometry
 from PhoPro.sim.kernels import alpha_kernel, gaussian_kernel

@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from PhoPro.core.PhotometryExperiment import PhotometryExperiment
-from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.core.PhotometryData import PhotometryData
 from PhoPro.utils.equations import neg_bi_exponential_5
 
 
@@ -496,23 +496,102 @@ def test_find_timestamp_in_intervals_supports_first_last_and_mean(experiment):
     intervals = np.asarray([[0.5, 2.0], [4.0, 6.0], [7.0, 8.0]])
 
     assert np.allclose(
-        experiment._find_timestamp_in_intervals(timestamps, intervals, logic="first"),
+        experiment._find_timestamp_in_intervals("event", timestamps, intervals, logic="first")["event"],
         [1.0, 5.0, np.nan],
         equal_nan=True,
     )
     assert np.allclose(
-        experiment._find_timestamp_in_intervals(timestamps, intervals, logic="last"),
+        experiment._find_timestamp_in_intervals("event", timestamps, intervals, logic="last")["event"],
         [2.0, 5.0, np.nan],
         equal_nan=True,
     )
     assert np.allclose(
-        experiment._find_timestamp_in_intervals(timestamps, intervals, logic="mean"),
+        experiment._find_timestamp_in_intervals("event", timestamps, intervals, logic="mean")["event"],
         [1.5, 5.0, np.nan],
         equal_nan=True,
     )
 
     with pytest.raises(ValueError, match="not recognized"):
-        experiment._find_timestamp_in_intervals(timestamps, intervals, logic="bogus")
+        experiment._find_timestamp_in_intervals("event", timestamps, intervals, logic="bogus")
+
+
+def test_find_timestamp_in_intervals_all_returns_numbered_occurrences(experiment):
+    timestamps = np.asarray([1.0, 1.5, 2.0, 5.0])
+    intervals = np.asarray([[0.5, 2.0], [4.0, 6.0], [7.0, 8.0]])
+
+    result = experiment._find_timestamp_in_intervals(
+        "event",
+        timestamps,
+        intervals,
+        logic="all",
+    )
+
+    assert list(result) == ["event", "event_occurrence_2", "event_occurrence_3"]
+    assert np.allclose(result["event"], [1.0, 5.0, np.nan], equal_nan=True)
+    assert np.allclose(result["event_occurrence_2"], [1.5, np.nan, np.nan], equal_nan=True)
+    assert np.allclose(result["event_occurrence_3"], [2.0, np.nan, np.nan], equal_nan=True)
+
+
+def test_find_timestamp_in_intervals_all_handles_no_matches(experiment):
+    result = experiment._find_timestamp_in_intervals(
+        "event",
+        timestamps=np.asarray([1.0, 2.0, 3.0]),
+        time_intervals=np.asarray([[4.0, 5.0], [6.0, 7.0]]),
+        logic="all",
+    )
+
+    assert list(result) == ["event"]
+    assert np.allclose(result["event"], [np.nan, np.nan], equal_nan=True)
+
+
+def test_annotate_intervals_all_adds_repeated_event_columns(experiment):
+    result = experiment._annotate_intervals(
+        align_label="cue",
+        series=np.asarray([0.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
+        centers=np.asarray([1.0, 3.0]),
+        events={
+            "lick": np.asarray([1.1, 1.2, 1.3, 3.2]),
+            "empty": np.asarray([], dtype=float),
+        },
+        tolorences={
+            "lick": (0.0, 0.4),
+            "empty": (0.0, 0.4),
+            "missing": (0.0, 0.4),
+        },
+        logic="all",
+    )
+
+    assert list(result) == ["cue", "lick", "lick_occurrence_2", "lick_occurrence_3", "empty", "missing"]
+    assert np.allclose(result["cue"], [1.0, 3.0])
+    assert np.allclose(result["lick"], [1.1, 3.2], equal_nan=True)
+    assert np.allclose(result["lick_occurrence_2"], [1.2, np.nan], equal_nan=True)
+    assert np.allclose(result["lick_occurrence_3"], [1.3, np.nan], equal_nan=True)
+    assert np.allclose(result["empty"], [np.nan, np.nan], equal_nan=True)
+    assert np.allclose(result["missing"], [np.nan, np.nan], equal_nan=True)
+
+
+def test_extract_trial_data_all_event_conflict_adds_repeated_event_columns(experiment):
+    experiment.preprocess_signal()
+    experiment.events["repeat_event"] = np.sort(np.concatenate([
+        experiment.events["event"] + 0.2,
+        experiment.events["event"] + 0.4,
+    ]))
+
+    experiment.extract_trial_data(
+        align_to="event",
+        center_on="repeat_event",
+        trial_bounds=(-1.0, 2.0),
+        event_tolerences={"repeat_event": (0.0, 0.6)},
+        all_events=False,
+        baseline_bounds=None,
+        trial_normalization="none",
+        event_conflict_logic="all",
+    )
+
+    assert "repeat_event" in experiment.trial_data.obs.columns
+    assert "repeat_event_occurrence_2" in experiment.trial_data.obs.columns
+    assert np.allclose(experiment.trial_data.obs["repeat_event"].to_numpy(dtype=float), 0.0)
+    assert np.allclose(experiment.trial_data.obs["repeat_event_occurrence_2"].to_numpy(dtype=float), 0.2)
 
 
 def test_find_interval_bounds_and_nearest_timestamp_mask(experiment):

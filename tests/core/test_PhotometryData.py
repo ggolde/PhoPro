@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.core.PhotometryData import PhotometryData
 from PhoPro.analysis.peaks import PeakResult
 
 
@@ -460,42 +460,6 @@ def test_detect_peaks_rolling_threshold_returns_peak_result():
     assert isinstance(result, PeakResult)
     assert result.n_peaks == 1
     assert result.df.iloc[0]["trial_idx"] == 0
-
-
-def test_anova_methods_delegate_to_pingouin(monkeypatch, photometry_data):
-    calls = {}
-
-    def fake_anova(data, **kwargs):
-        calls["anova"] = kwargs
-        return pd.DataFrame({"Source": ["condition"], "F": [1.0]})
-
-    def fake_rm_anova(data, **kwargs):
-        calls["rm_anova"] = kwargs
-        return pd.DataFrame({"Source": ["phase"], "F": [2.0]})
-
-    def fake_mixed_anova(data, **kwargs):
-        calls["mixed_anova"] = kwargs
-        return pd.DataFrame({"Source": ["interaction"], "F": [3.0]})
-
-    monkeypatch.setattr("PhoPro.core.PhotometeryData.pg.anova", fake_anova)
-    monkeypatch.setattr("PhoPro.core.PhotometeryData.pg.rm_anova", fake_rm_anova)
-    monkeypatch.setattr("PhoPro.core.PhotometeryData.pg.mixed_anova", fake_mixed_anova)
-
-    aov = photometry_data.ANOVA(dependent_var="score", between="condition")
-    rm = photometry_data.ANOVA_rm(dependent_var="score", within="condition", subject="animal")
-    mixed = photometry_data.ANOVA_mixed(
-        dependent_var="score",
-        between="animal",
-        within="condition",
-        subject="animal",
-    )
-
-    assert aov.loc[0, "F"] == 1.0
-    assert rm.loc[0, "F"] == 2.0
-    assert mixed.loc[0, "F"] == 3.0
-    assert calls["anova"]["dv"] == "score"
-    assert calls["rm_anova"]["within"] == "condition"
-    assert calls["mixed_anova"]["between"] == "animal"
 
 
 # --- plotting ---

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Literal
 
 from .PhotometryExperiment import PhotometryExperiment
-from .PhotometeryData import PhotometryData
+from .PhotometryData import PhotometryData
 from .PhotometryLoader import PhotometryLoader
 
 LoaderKwargs = dict[str, Any] | list[dict[str, Any]]

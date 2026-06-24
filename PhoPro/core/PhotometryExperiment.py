@@ -14,7 +14,7 @@ import matplotlib.axes
 import numpy as np
 import pandas as pd
 
-from .PhotometeryData import PhotometryData
+from .PhotometryData import PhotometryData
 
 from ..utils import graphing, operations, reference_fitting, window
 
@@ -564,7 +564,7 @@ class PhotometryExperiment:
             all_events: bool = True,
             window_alignment: Literal['nearest', 'interp'] = 'nearest',
             invalid_window_policy: Literal['drop', 'error'] = 'drop',
-            event_conflict_logic: Literal['first', 'last', 'mean'] = 'first',
+            event_conflict_logic: Literal['first', 'last', 'all', 'mean'] = 'first',
             ) -> None:
         """Build trial-wise windows, normalize, and store trial data.
 
@@ -603,9 +603,10 @@ class PhotometryExperiment:
         invalid_window_policy : {'drop', 'error'}, default='drop'
             Policy for trial or baseline windows extending outside the signal
             range.
-        event_conflict_logic : {'first', 'last', 'mean'}, default='first'
-            Rule used when multiple timestamps for the same event label fall
-            inside a trial annotation window.
+        event_conflict_logic : {'first', 'last', 'all' 'mean'}, default='first'
+            Rule used when multiple timestamps for the same event label fall inside
+            a trial annotation window. If 'all', the first occurrence keeps the base
+            event label and later occurrences are stored as '<label>_occurrence_#n'.
 
         Raises
         ------
@@ -980,24 +981,35 @@ class PhotometryExperiment:
 
     def _find_timestamp_in_intervals(
             self,
+            label: str,
             timestamps: np.ndarray,
             time_intervals: np.ndarray,
-            logic: Literal['first', 'last', 'mean'] = 'first',
-            ) -> np.ndarray:
+            logic: Literal['first', 'last', 'all', 'mean'] = 'first',
+            ) -> dict[str, np.ndarray]:
         """Find timestamps within each time interval using customizable logic."""
-        # tests which events are in interval
         timestamps = np.sort(timestamps)
+
+        # tests which events are in valid intervals
+        valid_intervals = time_intervals[:, 0] <= time_intervals[:, 1]
         lo_idx = np.searchsorted(timestamps, time_intervals[:, 0], side="left")
         hi_idx = np.searchsorted(timestamps, time_intervals[:, 1], side="right")
-        in_interval = lo_idx < hi_idx
+        in_interval = valid_intervals & (lo_idx < hi_idx)
+
+        # pre allocate
+        n_intervals = len(time_intervals)
+        interval_timestamps = np.full(n_intervals, np.nan, float)
 
         # perform choice logic
-        out = np.full(len(time_intervals), np.nan, float)
         match logic:
+
             case 'first':
-                out[in_interval] = timestamps[lo_idx[in_interval]]
+                interval_timestamps[in_interval] = timestamps[lo_idx[in_interval]]
+                return {label : interval_timestamps}
+
             case 'last':
-                out[in_interval] = timestamps[hi_idx[in_interval] - 1]
+                interval_timestamps[in_interval] = timestamps[hi_idx[in_interval] - 1]
+                return {label : interval_timestamps}
+
             case 'mean':
                 counts = hi_idx - lo_idx
                 in_interval = counts > 0
@@ -1005,10 +1017,36 @@ class PhotometryExperiment:
                 csum = np.concatenate(([0.0], np.cumsum(timestamps)))
                 sums = csum[hi_idx] - csum[lo_idx]
 
-                out[in_interval] = sums[in_interval] / counts[in_interval]
+                interval_timestamps[in_interval] = sums[in_interval] / counts[in_interval]
+                return {label : interval_timestamps}
+
+            case 'all':
+                # find max occurence count
+                counts = np.where(in_interval, hi_idx - lo_idx, 0)
+                max_count = int(counts.max(initial=0))
+
+                # zero case
+                if max_count == 0:
+                    return {label : interval_timestamps}
+
+                # pack values into 2D array
+                values = np.full((n_intervals, max_count), np.nan, dtype=float)
+
+                occurrence_offsets = np.arange(max_count)
+                candidate_idxs = lo_idx[:, None] + occurrence_offsets[None, :] # canidate timestamp idxs
+                # only add if that trial acutal had that many occurences
+                valid_occurrences = occurrence_offsets[None, :] < counts[:, None]
+                values[valid_occurrences] = timestamps[candidate_idxs[valid_occurrences]]
+
+                # package into dict, with + _n# naming scheme
+                result = {label: values[:, 0]}
+                for occurrence_idx in range(2, max_count + 1):
+                    result[f"{label}_occurrence_{occurrence_idx}"] = values[:, occurrence_idx - 1]
+
+                return result
+
             case _:
                 raise ValueError(f'Multiple event selection logic, {logic}, is not recognized')
-        return out
 
     def _resolve_alignment(
             self,
@@ -1146,41 +1184,41 @@ class PhotometryExperiment:
             centers: np.ndarray,
             events: dict[str, np.ndarray],
             tolorences: dict[str, np.ndarray],
-            logic: Literal['first', 'last', 'mean'] = 'first',
+            logic: Literal['first', 'last', 'all', 'mean'] = 'first',
             ) -> dict[str, np.ndarray]:
         """Annotate intervals around centers with event timestamps."""
         out = {align_label: centers.copy()}
         tmin, tmax = series[0], series[-1]
 
         for label, bounds in tolorences.items():
+            # validation
             low, high = map(float, bounds)
             if low > high:
                 raise ValueError(f"Invalid bounds for {label}: {bounds}")
 
             timestamps = events.get(label)
             if timestamps is None:
-                out[label] = np.full(centers.shape, np.nan, dtype=float)
+                out[label] = np.full_like(centers, np.nan, dtype=float)
                 continue
 
             timestamps = np.asarray(timestamps, dtype=float)
             if timestamps.ndim != 1:
                 raise ValueError(f"Event timestamps for {label} must be 1D")
 
+            # build and clip intervals to time series bounds
             time_intervals = np.column_stack((centers + low, centers + high))
             time_intervals[:, 0] = np.maximum(time_intervals[:, 0], tmin)
             time_intervals[:, 1] = np.minimum(time_intervals[:, 1], tmax)
 
-            invalid = time_intervals[:, 0] > time_intervals[:, 1]
-            selected = np.full(centers.shape, np.nan, dtype=float)
-
-            if timestamps.size > 0 and np.any(~invalid):
-                selected[~invalid] = self._find_timestamp_in_intervals(
+            # pass to helper to actually find timestamps in intervals
+            out.update(
+                self._find_timestamp_in_intervals(
+                    label=label,
                     timestamps=timestamps,
-                    time_intervals=time_intervals[~invalid],
-                    logic=logic,
+                    time_intervals=time_intervals,
+                    logic=logic
                 )
-
-            out[label] = selected
+            )
         return out
 
     def _create_windows(
@@ -1418,6 +1456,46 @@ class PhotometryExperiment:
         stop = np.searchsorted(self.time, upper, side='right')
 
         self.trim_times_by_index(start, stop)
+
+    def merge_events(
+            self,
+            to_merge: list[str],
+            new_label: str,
+            drop_merged: bool = True,
+            ) -> None:
+        """Merge multiple event labels into one.
+
+        Parameters
+        ----------
+        to_merge : list[str]
+            The labels of the events to merge together.
+        new_label : str
+            The new label for the merged event.
+        drop_merged : bool, default=True
+            Whether to drop the events in ``to_merge`` after merging.
+            Excludes ``new_label`` if ``new_label`` in ``to_merge``.
+
+        Raises
+        ------
+        KeyError
+            If any in ``to_merge`` are not in ``self.event_labels``.
+        """
+        # validate inputs
+        missing = [label for label in to_merge if label not in self.event_labels]
+        if missing:
+            raise KeyError(f'Event labels {missing} not found in events.')
+        
+        # merge timestamps and add
+        merged_timestamps = np.concat([self.events[label] for label in to_merge])
+        self.events[new_label] = np.sort(merged_timestamps)
+
+        # optionally drop merged events
+        if drop_merged:
+            self.events = {
+                label : arr for label, arr in self.events.items()
+                if (label not in to_merge) or (label == new_label)
+            }
+
 
     #endregion
 

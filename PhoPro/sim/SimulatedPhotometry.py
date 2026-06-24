@@ -9,7 +9,7 @@ import pandas as pd
 from plotnine import ggplot
 
 from ..core.PhotometryExperiment import PhotometryExperiment
-from ..core.PhotometeryData import PhotometryData
+from ..core.PhotometryData import PhotometryData
 from ..utils import operations, graphing, window
 
 from .kernels import(
@@ -207,7 +207,7 @@ class SimulatedPhotometry:
             Mean of random neural dynamic noise.
         dynamic_noise_frequency : float, default 1.0
             Frequency of random neural dynamic noise. 
-            Should be > experiment frequency.
+            Should be < sampling frequency.
         movement_attenuation : float, default=0.5
             Attenuation strength for movement artifacts.
         attenuation_cutoff_hz : float, default=0.1
@@ -399,6 +399,30 @@ class SimulatedPhotometry:
             Stored event specification.
         """
         return self.event_layer.specs[label]
+    
+    def _nearest_timestamp_mask(self, times: np.ndarray, timestamps: np.ndarray):
+        """Get boolean mask of time, with nearest times to timestamp as True."""
+        mask = np.zeros(times.shape, dtype=bool)
+
+        if len(times) == 0 or len(timestamps) == 0:
+            return mask
+
+        if len(times) == 1:
+            mask[0] = True
+            return mask
+
+        idx = np.searchsorted(times, timestamps)
+
+        idx_right = np.clip(idx, 0, len(times) - 1)
+        idx_left = np.clip(idx - 1, 0, len(times) - 1)
+
+        dist_left = np.abs(timestamps - times[idx_left])
+        dist_right = np.abs(timestamps - times[idx_right])
+
+        nearest_idx = np.where(dist_right < dist_left, idx_right, idx_left)
+
+        mask[nearest_idx] = True
+        return mask
 
 
     #endregion
@@ -917,6 +941,54 @@ class SimulatedPhotometry:
 
         # concat result and return
         df = pd.concat(df_list, axis=0, ignore_index=True)
+        return df
+    
+    def to_experiment_csv(
+            self,
+            export_events: bool = True,
+            downsample: int | None = None,
+            downsample_kwargs: dict = {},
+            ) -> pd.DataFrame:
+        """Export F_exp, F_iso, and neural trace to a wide dataframe.
+
+        Mainly used for exporting to CSVLoader compatible files with a comparable ground truth.
+
+        Parameters
+        ----------
+        export_events : bool, default=True
+            If ``True``, add one boolean column per event label with nearest
+            sampled time points marked as event occurrences.
+        downsample : int or None, default=None
+            Downsampling factor applied to each exported trace. If ``None``,
+            traces are exported at their current sampling.
+        downsample_kwargs : dict, default={}
+            Additional keyword arguments passed to the downsampling helpers.
+
+        Returns
+        -------
+        pd.DataFrame
+            Wide dataframe with one row per exported time point.
+        """
+        def _column_add_helper(df: pd.DataFrame, col: str, val: np.ndarray | None) -> pd.DataFrame:
+            """Add a downsampled array as a dataframe column when present."""
+            if val is None: return df
+            else: return df.assign(**{col: operations.downsample_signal(val, factor=downsample, **downsample_kwargs)})
+
+        export_time = operations.downsample_time(self.time, factor=downsample, **downsample_kwargs)
+
+        df = (
+            pd.DataFrame({'time' : export_time}, index=np.arange(export_time.size))
+            .pipe(_column_add_helper, 'signal', self.F_exp)
+            .pipe(_column_add_helper, 'isosbestic', self.F_iso)
+            .pipe(_column_add_helper, 'nueral_trace', self.neural_trace_exp)
+        )
+
+        if export_events:
+            for label, spec in self.event_layer.specs.items():
+                timestamps = spec.onsets
+                time_has_event = self._nearest_timestamp_mask(export_time, timestamps)
+                df[label] = time_has_event
+
         return df
 
     #endregion

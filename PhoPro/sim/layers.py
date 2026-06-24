@@ -137,7 +137,7 @@ class PhotobleachingLayer_alt:
     """Alternative bi-exponential photobleaching baseline layer."""
 
     B0: float
-    B_inf: float
+    B_floor: float
     tau1: float
     tau2: float
     weight1: float
@@ -160,7 +160,7 @@ class PhotobleachingLayer_alt:
         ValueError
             If the rendered baseline contains non-positive values.
         """
-        B = self.B_inf + (self.B0 - self.B_inf) * (
+        B = self.B_floor + (self.B0 - self.B_floor) * (
             self.weight1 * np.exp(-time / self.tau1)
             + (1.0 - self.weight1) * np.exp(-time / self.tau2)
         )
@@ -515,7 +515,7 @@ class EventLayer:
             onsets: np.ndarray,
             amplitude: np.ndarray,
             kernel_func: np.ndarray,
-            kernel_params: dict[str, Any]
+            kernel_params: dict[str, Any],
             ) -> None:
         """Add an event specification from individual fields.
 

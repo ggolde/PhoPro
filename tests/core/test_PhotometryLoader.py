@@ -3,7 +3,7 @@ import pytest
 import pathlib
 
 from PhoPro.core.PhotometryExperiment import PhotometryExperiment
-from PhoPro.core.PhotometeryData import PhotometryData
+from PhoPro.core.PhotometryData import PhotometryData
 from PhoPro.core.PhotometryLoader import PhotometryLoader, TDTLoader, CSVLoader
 
 # --- correct loading ---

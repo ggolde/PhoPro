@@ -23,7 +23,7 @@ except ImportError:
     _HAS_JOBLIB = False
 
 if TYPE_CHECKING:
-    from ..core.PhotometeryData import PhotometryData
+    from ..core.PhotometryData import PhotometryData
 
 ############################
 #region --- RESULT CLASS ---
@@ -319,7 +319,7 @@ def cluster_permutation_test(
     ValueError
         If the two groups have different numbers of time points.
     """
-    from ..core.PhotometeryData import PhotometryData
+    from ..core.PhotometryData import PhotometryData
 
     # validate inputs
     if isinstance(A, PhotometryData):
@@ -490,7 +490,7 @@ def cluster_depth_test(
     ValueError
         If the two groups have different numbers of time points.
     """
-    from ..core.PhotometeryData import PhotometryData
+    from ..core.PhotometryData import PhotometryData
 
     # validate inputs
     if isinstance(A, PhotometryData):
