@@ -382,7 +382,7 @@ class PhotometryExperiment:
     ##############################
     def preprocess_signal(
             self,
-            cutoff_frequency: float = 3.0,
+            cutoff_frequency: float | None = 3.0,
             order: int = 4,
             signal_normalization: Literal['zscore', 'nullZ', 'none'] | Callable = 'none',
             correction_method: Literal['dF/F', 'dF', 'dB/B', 'dB', 'none'] | Callable = 'dF/F',
@@ -397,8 +397,9 @@ class PhotometryExperiment:
 
         Parameters
         ----------
-        cutoff_frequency : float, default=3.0
-            Low-pass cutoff frequency in Hz.
+        cutoff_frequency : float or None, default=3.0
+            Low-pass cutoff frequency in Hz. If None, no lowpass filtering
+            is performed.
         order : int, default=4
             Butterworth filter order.
         signal_normalization : {'zscore', 'nullZ', 'none'} or Callable, default='none'
@@ -729,7 +730,7 @@ class PhotometryExperiment:
             self,
             signal: np.ndarray,
             sample_frequency: float,
-            cutoff_frequency: float = 30.0,
+            cutoff_frequency: float | None = 3.0,
             order: int = 4,
             axis: int = 0,
         ) -> np.ndarray:
@@ -741,8 +742,9 @@ class PhotometryExperiment:
             Input signal array.
         sample_frequency : float
             Sampling frequency in Hz.
-        cutoff_frequency : float, default=30.0
-            Low-pass cutoff frequency in Hz.
+        cutoff_frequency : float or None, default=3.0
+            Low-pass cutoff frequency in Hz. If None, no lowpass filtering
+            is performed.
         order : int, default=4
             Butterworth filter order.
         axis : int, default=0
@@ -753,6 +755,10 @@ class PhotometryExperiment:
         np.ndarray
             Filtered signal.
         """
+        # do nothing in None case
+        if cutoff_frequency is None:
+            return signal
+        # perform lowpass
         normalized_frequency = cutoff_frequency / (sample_frequency / 2)
         sos = butter(order, normalized_frequency, btype='low', output='sos')
         return sosfiltfilt(sos, signal, axis=axis, padtype='odd', padlen=None)

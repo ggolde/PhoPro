@@ -794,7 +794,8 @@ class SimulatedPhotometry:
             center_on: str | Sequence[str] | None = None,
             window_alignment: Literal['nearest', 'interp'] = 'nearest',
             invalid_window_policy: Literal['drop', 'error'] = 'drop',
-            event_conflict_logic: Literal['first', 'last', 'mean'] = 'first',
+            event_conflict_logic: Literal['first', 'last', 'all', 'mean'] = 'first',
+            include_dynamic_noise: bool = True,
             ) -> PhotometryData:
         """Extract simulated neural trace into trial-wise `PhotometryData`.
 
@@ -812,9 +813,14 @@ class SimulatedPhotometry:
             ``PhotometryExperiment.extract_trial_data``.
         invalid_window_policy : {'drop', 'error'}, default='drop'
             Policy for windows that extend outside the signal range.
-        event_conflict_logic : {'first', 'last', 'mean'}, default='first'
-            Rule used when multiple events of the same label occur in one
-            annotation window.
+        event_conflict_logic : {'first', 'last', 'all', 'mean'}, default='first'
+            Rule used when multiple timestamps for the same event label fall 
+            inside a trial annotation window. If 'all', the first occurrence 
+            keeps the base event label and later occurrences are 
+            stored as '(label)_occurrence_n'.
+        include_dynamic_noise : bool, default=True
+            Whether to include the dynamic noise layer in output or the
+            raw event layer.
 
         Returns
         -------
@@ -830,7 +836,7 @@ class SimulatedPhotometry:
         )
 
         # override to skip preprocessing
-        exp.signal = self.E
+        exp.signal = self.neural_trace_exp if include_dynamic_noise else self.E
 
         # use experiments extract trial infrastructure
         exp.extract_trial_data(
