@@ -189,7 +189,7 @@ class TDTLoader(PhotometryLoader):
         sig = tdt_obj.streams[self.signal_label + self.box].data
         iso = tdt_obj.streams[self.isosbestic_label + self.box].data
         fs = tdt_obj.streams[self.signal_label + self.box].fs
-        start_time = tdt_obj.streamts[self.signal_label + self.box].start_time
+        start_time = tdt_obj.streams[self.signal_label + self.box].start_time
 
         # downsample raw signals
         raw_signal: np.ndarray = downsample_signal(np.asarray(sig, dtype=np.float32), factor=self.downsample, **self.downsample_kwargs)
@@ -197,7 +197,7 @@ class TDTLoader(PhotometryLoader):
 
         # contruct time
         n_times = raw_signal.size
-        raw_time = (start_time + np.arange(n_times, dtype=float)) / float(fs)
+        raw_time = start_time + (np.arange(n_times, dtype=float) / float(fs))
         time = downsample_time(np.asarray(raw_time, dtype=np.float32), factor=self.downsample, **self.downsample_kwargs)
         frequency = time.size / (time[-1] - time[0])
 
