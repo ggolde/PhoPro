@@ -690,13 +690,16 @@ class PhotometryExperiment:
             baseline_windows=baseline_windows,
         )
 
-        # save trial data
+        # construct trial df info
         trial_obs = pd.concat(
-                [align_obs.loc[valid_trial_mask].reset_index(drop=True),
-                 pd.DataFrame(trial_windows.events).reset_index(drop=True)],
+                [
+                    trial_windows.to_obs(add_trial_num=True),
+                    align_obs.loc[valid_trial_mask].reset_index(drop=True),
+                ],
                 axis=1,
             )
 
+        # save trial data
         self.trial_data = PhotometryData.from_arrays(
             obs=trial_obs,
             data=processed_trial_signals,
@@ -704,16 +707,15 @@ class PhotometryExperiment:
             metadata=self.metadata.copy(),
         )
 
-        # assign trial numbers
-        self.trial_data.obs.insert(0, 'trial_num', np.arange(self.trial_data.n_trials, dtype=int) + 1)
-
         # save baseline data if applicable
         if calc_baselines:
             baseline_obs = pd.concat(
-                [align_obs.loc[valid_trial_mask].reset_index(drop=True),
-                 pd.DataFrame(baseline_windows.events).reset_index(drop=True)],
-                axis=1,
-            )
+                    [
+                        baseline_windows.to_obs(add_trial_num=True),
+                        align_obs.loc[valid_trial_mask].reset_index(drop=True),
+                    ],
+                    axis=1,
+                )
             self.baseline_data = PhotometryData.from_arrays(
                 obs=baseline_obs,
                 data=baseline_windows.signals,

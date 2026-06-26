@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 from dataclasses import dataclass
 
@@ -7,10 +8,13 @@ class WindowResult:
     signals: np.ndarray
     times: np.ndarray
     time_grid: np.ndarray
+    centers: np.ndarray
     invalid_mask: np.ndarray
     events: dict[str, np.ndarray] | None
     layers: dict[str, np.ndarray] | None
 
+    @property
+    def n_windows(self) -> int: return self.signals.shape[0]
     @property
     def has_events(self) -> bool: return self.events is not None
     @property
@@ -20,12 +24,26 @@ class WindowResult:
         self.signals = self.signals[mask, :]
         self.times = self.times[mask, :]
         self.invalid_mask = self.invalid_mask[mask]
+        self.centers = self.centers[mask]
 
         if self.has_events:
             self.events = {k : arr[mask] for k, arr in self.events.items()}
 
         if self.has_layers:
             self.layers = {k : arr[mask] for k, arr in self.layers.items()}
+
+    def to_obs(self, add_trial_num: bool = False) -> pd.DataFrame:
+        data = {}
+        if add_trial_num:
+            data['trial_num'] = np.arange(self.n_windows) + 1
+        
+        data['start_time'] = self.centers + self.time_grid[0]
+        data['stop_time'] = self.centers + self.time_grid[-1]
+
+        data.update(self.events)
+
+        return pd.DataFrame(data)
+
 
 def _build_relative_time_grid(bounds: tuple[float, float], freq: float) -> np.ndarray:
     low, high = bounds
@@ -174,6 +192,7 @@ def create_windows_nearest_1D(
         signals=signal_windows,
         times=time_windows,
         time_grid=common_time_grid,
+        centers=snapped_centers,
         invalid_mask=invalid_window_mask,
         events=events_centered,
         layers=None,
@@ -213,6 +232,7 @@ def create_windows_interp_1D(
         signals=signal_windows,
         times=time_windows,
         time_grid=common_time_grid,
+        centers=centers,
         invalid_mask=invalid_window_mask,
         events=events_centered,
         layers=None,
@@ -270,6 +290,7 @@ def create_windows_nearest_2D(
         signals=signal_windows,
         times=time_windows,
         time_grid=common_time_grid,
+        centers=snapped_centers,
         invalid_mask=invalid_window_mask,
         events=events_centered,
         layers=layer_windows,
@@ -325,6 +346,7 @@ def create_windows_interp_2D(
         signals=signal_windows,
         times=time_windows,
         time_grid=common_time_grid,
+        centers=centers,
         invalid_mask=invalid_window_mask,
         events=events_centered,
         layers=layer_windows,
