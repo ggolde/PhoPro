@@ -74,7 +74,7 @@ class PhotometryExperiment:
         self.time = time
         self.events = events
         self.metadata = metadata
-        self.frequency = raw_signal.size / (self.time.max() - self.time.min() + 1) if frequency is None else frequency
+        self.frequency = (raw_signal.size - 1) / (self.time.max() - self.time.min()) if frequency is None else frequency
 
         self.id = None
         self.signal = None

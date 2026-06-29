@@ -172,8 +172,11 @@ class ArtifactResult:
 
     @property
     def score(self) -> float:
-        """Aggregate artifact score based on amplitude and duration."""
-        return np.sum(np.log10(self.df['amplitude']) * self.df['duration'])
+        """Aggregate artifact score based on amplitude and duration.
+        
+        Equivalent to the sum of ``ln(abs(amplitude) + 1) * duration``
+        """
+        return np.sum(np.log(self.df['amplitude'].abs() + 1) * self.df['duration'])
 
     def calculate_metrics(
             self,

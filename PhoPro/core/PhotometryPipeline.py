@@ -314,7 +314,7 @@ class PhotometryPipeline:
             if self.trial_data is None:
                 self.trial_data = exp.trial_data.copy()
             else:
-                self.trial_data.combine_obj(exp.trial_data, inplace=True)
+                self.trial_data.combine_obj(exp.trial_data, inplace=True, check_time=True, time_tol=1e-6)
 
     def _finalize_result(
             self,

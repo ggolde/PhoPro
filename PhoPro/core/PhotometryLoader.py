@@ -192,20 +192,20 @@ class TDTLoader(PhotometryLoader):
         start_time = tdt_obj.streams[self.signal_label + self.box].start_time
 
         # downsample raw signal
-        raw_signal: np.ndarray = downsample_signal(np.asarray(sig, dtype=np.float32), factor=self.downsample, **self.downsample_kwargs)
+        raw_signal: np.ndarray = downsample_signal(np.asarray(sig, dtype=np.float64), factor=self.downsample, **self.downsample_kwargs)
 
         # handle isosbestic if present
         if self.isosbestic_label is not None:
             iso = tdt_obj.streams[self.isosbestic_label + self.box].data
-            raw_isosbestic: np.ndarray = downsample_signal(np.asarray(iso, dtype=np.float32), factor=self.downsample, **self.downsample_kwargs)
+            raw_isosbestic: np.ndarray = downsample_signal(np.asarray(iso, dtype=np.float64), factor=self.downsample, **self.downsample_kwargs)
         else:
             raw_isosbestic = None
 
         # contruct time
-        n_times = raw_signal.size
+        n_times = sig.size
         raw_time = start_time + (np.arange(n_times, dtype=float) / float(fs))
-        time = downsample_time(np.asarray(raw_time, dtype=np.float32), factor=self.downsample, **self.downsample_kwargs)
-        frequency = time.size / (time[-1] - time[0])
+        time = downsample_time(np.asarray(raw_time, dtype=np.float64), factor=self.downsample, **self.downsample_kwargs)
+        frequency = (time.size - 1) / (time[-1] - time[0])
 
         # extract events
         events = self.extract_events(tdt_obj)
@@ -361,7 +361,7 @@ class CSVLoader(PhotometryLoader):
 
             for col in self.event_cols:
                 present = df[col].fillna(False).astype(bool).to_numpy()
-                events[col] = np.asarray(time[present], dtype=float)
+                events[col] = np.asarray(time[present], dtype=np.float64)
 
         # load annotations
         if self.annotation_file is not None:

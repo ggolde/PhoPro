@@ -133,7 +133,7 @@ class PhotometryData:
     @property
     def freq(self) -> float:
         """Estimated sampling frequency for trial time points."""
-        return self.n_times / (self.ts[-1] - self.ts[0] + 1)
+        return (self.n_times - 1) / (self.ts[-1] - self.ts[0])
     @property
     def dt(self) -> float:
         """Estimated sampling interval for trial time points."""
@@ -317,7 +317,9 @@ class PhotometryData:
             inplace: bool = False,
             join: str = 'inner',
             merge: str ='same',
-            uns_merge: str = 'same'
+            uns_merge: str = 'same',
+            check_time: bool = False,
+            time_tol: float = 1e-6,
             ) -> None | Self:
         """Concatenate this object with one or more `PhotometryData` objects.
 
@@ -334,6 +336,13 @@ class PhotometryData:
             Merge strategy for elements not aligned to the concatenated axis.
         uns_merge : str, default='same'
             Merge strategy for unstructured metadata.
+        check_time : bool, default=False
+            Whether to check if all times are close. If ``True``, an error 
+            will be thrown if the times of ``to_append`` are outside of ``time_tol``
+            when compared to ``self.ts``.
+        time_tol : float, default=1e-6
+            The absolute tolerance for close time series. The combined object will
+            inherit ``self.ts``.
 
         Returns
         -------
@@ -354,6 +363,12 @@ class PhotometryData:
             adata.var_names = adata.var_names.astype(str)
             offset += adata.n_obs
 
+            # check for time misalignment
+            if check_time and ('t' in adata.var):
+                if not np.allclose(self.ts, adata.var['t'].to_numpy(), atol=time_tol, rtol=0):
+                    misalignment = np.max(self.ts - adata.var['t'])
+                    raise ValueError(f'Time-series misalignment ({misalignment}) is greater than time_tol ({time_tol})')
+
         merged_adata = ad.concat(
             adatas=adatas,
             axis="obs",
@@ -367,6 +382,9 @@ class PhotometryData:
         merged_adata.obs_names = pd.Index(
             np.arange(merged_adata.n_obs, dtype=int).astype(str)
         )
+
+        # inherit time series
+        merged_adata.var['t'] = self.var['t']
 
         if inplace:
             self.adata = merged_adata
