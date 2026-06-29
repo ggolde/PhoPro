@@ -3,6 +3,7 @@
 This tutorial requires ipykernel and Jupyter Notebooks. It covers the basics of the ``PhoPro`` package for photometry data processing, handling, and analysis.
 
 While using this package does not require much coding or technical knowledge, it is the good to get familiar with:
+
 * [Basic Python](https://www.w3schools.com/python/default.asp).
 
 * The [numpy package](https://www.w3schools.com/python/numpy/default.asp) and numpy arrays.
@@ -520,7 +521,7 @@ trials
 
 
 
-    Photometry dataset with 20 trials, 1598 timepoints, and 5 observations.
+    Photometry dataset with 20 trials, 1598 timepoints, and 7 observations.
 
 
 
@@ -541,7 +542,7 @@ trials
 
 
 
-    Photometry dataset with 20 trials, 1598 timepoints, and 5 observations.
+    Photometry dataset with 20 trials, 1598 timepoints, and 7 observations.
 
 
 
@@ -553,10 +554,138 @@ The main attributes of a ``PhotometryData`` object are:
 
 * ``.ts`` a 1D numpy array of the time series
 
-Let's examine these attributes below. Note that the event timestamp present in the experiment automatically populate ``.obs``, with ``NaN`` values corresponding to the event being abscent in that trial. Additionally ``trial_num`` is automatically populated by the order of trials found in the experiment.
+Let's examine these attributes below. Note that the event timestamp present in the experiment automatically populate ``.obs``, with ``NaN`` values corresponding to the event being abscent in that trial. 
+
+Three other columns are also automatically populated by ``extract_trial_data()``:
+
+* ``trial_num``: the order of trials found in the experiment.
+
+* ``start_time``: the time within the experiment that the trial starts.
+
+* ``stop_time``: the time within the experiment that the trial ends.
 
 
 ```python
+trials.obs.head(5)
+```
+
+
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>trial_num</th>
+      <th>start_time</th>
+      <th>stop_time</th>
+      <th>trial_cue</th>
+      <th>lever1</th>
+      <th>lever2</th>
+      <th>shock</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>1</td>
+      <td>15.52</td>
+      <td>31.50581</td>
+      <td>-3.52</td>
+      <td>0.0</td>
+      <td>NaN</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>2</td>
+      <td>65.23</td>
+      <td>81.21581</td>
+      <td>-2.71</td>
+      <td>0.0</td>
+      <td>NaN</td>
+      <td>1.22</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>3</td>
+      <td>113.05</td>
+      <td>129.03581</td>
+      <td>0.00</td>
+      <td>NaN</td>
+      <td>NaN</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>3</th>
+      <td>4</td>
+      <td>167.51</td>
+      <td>183.49581</td>
+      <td>-3.94</td>
+      <td>0.0</td>
+      <td>NaN</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td>5</td>
+      <td>217.89</td>
+      <td>233.87581</td>
+      <td>-3.79</td>
+      <td>0.0</td>
+      <td>NaN</td>
+      <td>NaN</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+
+
+```python
+display(
+    trials.ts[:10],     # time series
+    trials.X[:2, :10],  # trial signals
+    trials.X.shape,     # of shape (n_trials, n_times)
+)
+```
+
+
+    array([-8.       , -7.9899901, -7.9799802, -7.9699703, -7.9599604,
+           -7.9499505, -7.9399406, -7.9299307, -7.9199208, -7.9099109])
+
+
+
+    array([[0.00568005, 0.00563251, 0.00561191, 0.00562358, 0.00567088,
+            0.00575452, 0.00587314, 0.00602279, 0.00619719, 0.00638825],
+           [0.00108119, 0.00089587, 0.00072785, 0.00058132, 0.00045983,
+            0.0003662 , 0.00030247, 0.00026987, 0.00026861, 0.0002981 ]])
+
+
+
+    (20, 1598)
+
+
+We will go ahead and drop the start and end time columns, as it is mainly diagnostic information and they won't be useful for us.
+
+
+```python
+trials.drop_obs_columns(['start_time', 'stop_time'])
 trials.obs.head(5)
 ```
 
@@ -635,31 +764,6 @@ trials.obs.head(5)
 
 
 
-
-```python
-display(
-    trials.ts[:10],     # time series
-    trials.X[:2, :10],  # trial signals
-    trials.X.shape,     # of shape (n_trials, n_times)
-)
-```
-
-
-    array([-8.       , -7.9899901, -7.9799802, -7.9699703, -7.9599604,
-           -7.9499505, -7.9399406, -7.9299307, -7.9199208, -7.9099109])
-
-
-
-    array([[ 0.00295883,  0.00252278,  0.00205403,  0.00157015,  0.00108872,
-             0.00062656,  0.00019903, -0.00018059, -0.00050136, -0.00075535],
-           [ 0.00132554,  0.00081562,  0.00031269, -0.00017586, -0.00064271,
-            -0.00108041, -0.00148172, -0.00183959, -0.00214753, -0.00239953]])
-
-
-
-    (20, 1598)
-
-
 Now let's see what we are working with by graphing the trials with ``.plot_trials()``.
 
 
@@ -671,7 +775,7 @@ trials.plot_trials()
 
 
     
-![png](Introduction_files/Introduction_47_0.png)
+![png](Introduction_files/Introduction_49_0.png)
     
 
 
@@ -800,7 +904,7 @@ trials.plot_trials(group_on='trial_label')
 
 
     
-![png](Introduction_files/Introduction_51_0.png)
+![png](Introduction_files/Introduction_53_0.png)
     
 
 
@@ -862,7 +966,7 @@ trials.obs.head(5)
       <td>NaN</td>
       <td>NaN</td>
       <td>type2</td>
-      <td>0.091611</td>
+      <td>0.078010</td>
     </tr>
     <tr>
       <th>1</th>
@@ -872,7 +976,7 @@ trials.obs.head(5)
       <td>NaN</td>
       <td>1.22</td>
       <td>type3</td>
-      <td>0.175445</td>
+      <td>0.150384</td>
     </tr>
     <tr>
       <th>2</th>
@@ -882,7 +986,7 @@ trials.obs.head(5)
       <td>NaN</td>
       <td>NaN</td>
       <td>NoResponse</td>
-      <td>0.034675</td>
+      <td>0.031360</td>
     </tr>
     <tr>
       <th>3</th>
@@ -892,7 +996,7 @@ trials.obs.head(5)
       <td>NaN</td>
       <td>NaN</td>
       <td>type2</td>
-      <td>0.100539</td>
+      <td>0.087299</td>
     </tr>
     <tr>
       <th>4</th>
@@ -902,7 +1006,7 @@ trials.obs.head(5)
       <td>NaN</td>
       <td>NaN</td>
       <td>type2</td>
-      <td>0.108677</td>
+      <td>0.091308</td>
     </tr>
   </tbody>
 </table>
@@ -923,7 +1027,7 @@ plt.show()
 
 
     
-![png](Introduction_files/Introduction_54_0.png)
+![png](Introduction_files/Introduction_56_0.png)
     
 
 
@@ -971,19 +1075,19 @@ trials.ANOVA(
     <tr>
       <th>0</th>
       <td>trial_label</td>
-      <td>0.029490</td>
+      <td>0.016580</td>
       <td>3</td>
-      <td>0.00983</td>
-      <td>81.690787</td>
-      <td>6.460323e-10</td>
-      <td>0.938714</td>
+      <td>0.005527</td>
+      <td>49.619326</td>
+      <td>2.512064e-08</td>
+      <td>0.902947</td>
     </tr>
     <tr>
       <th>1</th>
       <td>Within</td>
-      <td>0.001925</td>
+      <td>0.001782</td>
       <td>16</td>
-      <td>0.00012</td>
+      <td>0.000111</td>
       <td>NaN</td>
       <td>NaN</td>
       <td>NaN</td>
@@ -1060,27 +1164,27 @@ avg.obs
       <td>type2</td>
       <td>6</td>
       <td>-3.358333</td>
-      <td>0.105312</td>
+      <td>0.083880</td>
       <td>0.644190</td>
-      <td>0.008474</td>
+      <td>0.006322</td>
     </tr>
     <tr>
       <th>1</th>
       <td>type3</td>
       <td>3</td>
       <td>-2.680000</td>
-      <td>0.167020</td>
+      <td>0.129047</td>
       <td>0.225536</td>
-      <td>0.006214</td>
+      <td>0.016952</td>
     </tr>
     <tr>
       <th>2</th>
       <td>type1</td>
       <td>6</td>
       <td>-3.030000</td>
-      <td>0.086236</td>
+      <td>0.066485</td>
       <td>0.514101</td>
-      <td>0.014008</td>
+      <td>0.010062</td>
     </tr>
   </tbody>
 </table>
@@ -1098,12 +1202,12 @@ avg.get_layer('std')
 
 
 
-    array([[0.00597655, 0.00586851, 0.00576964, ..., 0.00313776, 0.00303783,
-            0.0029651 ],
-           [0.00537705, 0.00576166, 0.0060615 , ..., 0.00608109, 0.00547902,
-            0.00478708],
-           [0.00985744, 0.00949797, 0.00905605, ..., 0.00420562, 0.00432497,
-            0.00452045]], shape=(3, 1598))
+    array([[0.00244562, 0.00257221, 0.00269665, ..., 0.00746858, 0.00713986,
+            0.00677318],
+           [0.00462332, 0.00531349, 0.00596617, ..., 0.0047484 , 0.00522709,
+            0.00571096],
+           [0.00528095, 0.00476425, 0.00446005, ..., 0.01031396, 0.01048537,
+            0.01053889]], shape=(3, 1598))
 
 
 
@@ -1121,7 +1225,7 @@ avg.plot_trials(
 
 
     
-![png](Introduction_files/Introduction_62_0.png)
+![png](Introduction_files/Introduction_64_0.png)
     
 
 
@@ -1151,7 +1255,7 @@ recentered_avg.plot_trials(err_layer='std')
 
 
     
-![png](Introduction_files/Introduction_64_0.png)
+![png](Introduction_files/Introduction_66_0.png)
     
 
 
@@ -1259,7 +1363,7 @@ print(trials)
 trials.obs.head(5)
 ```
 
-    Photometry dataset with 60 trials, 320 timepoints, and 9 observations.
+    Photometry dataset with 60 trials, 320 timepoints, and 11 observations.
 
 
 
@@ -1284,6 +1388,8 @@ trials.obs.head(5)
     <tr style="text-align: right;">
       <th></th>
       <th>trial_num</th>
+      <th>start_time</th>
+      <th>stop_time</th>
       <th>trial_cue</th>
       <th>lever1</th>
       <th>lever2</th>
@@ -1298,6 +1404,8 @@ trials.obs.head(5)
     <tr>
       <th>0</th>
       <td>1</td>
+      <td>15.4924</td>
+      <td>31.457552</td>
       <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1310,6 +1418,8 @@ trials.obs.head(5)
     <tr>
       <th>1</th>
       <td>2</td>
+      <td>65.1924</td>
+      <td>81.157553</td>
       <td>-2.70</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1322,6 +1432,8 @@ trials.obs.head(5)
     <tr>
       <th>2</th>
       <td>3</td>
+      <td>112.9924</td>
+      <td>128.957552</td>
       <td>0.00</td>
       <td>NaN</td>
       <td>NaN</td>
@@ -1334,6 +1446,8 @@ trials.obs.head(5)
     <tr>
       <th>3</th>
       <td>4</td>
+      <td>167.4924</td>
+      <td>183.457552</td>
       <td>-3.95</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1346,6 +1460,8 @@ trials.obs.head(5)
     <tr>
       <th>4</th>
       <td>5</td>
+      <td>217.8424</td>
+      <td>233.807552</td>
       <td>-3.80</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1419,7 +1535,7 @@ print(trials)
 trials.obs.head(5)
 ```
 
-    Photometry dataset with 60 trials, 320 timepoints, and 9 observations.
+    Photometry dataset with 60 trials, 320 timepoints, and 11 observations.
 
 
 
@@ -1444,6 +1560,8 @@ trials.obs.head(5)
     <tr style="text-align: right;">
       <th></th>
       <th>trial_num</th>
+      <th>start_time</th>
+      <th>stop_time</th>
       <th>trial_cue</th>
       <th>lever1</th>
       <th>lever2</th>
@@ -1458,6 +1576,8 @@ trials.obs.head(5)
     <tr>
       <th>0</th>
       <td>1</td>
+      <td>15.4924</td>
+      <td>31.457552</td>
       <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1470,6 +1590,8 @@ trials.obs.head(5)
     <tr>
       <th>1</th>
       <td>2</td>
+      <td>65.1924</td>
+      <td>81.157553</td>
       <td>-2.70</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1482,6 +1604,8 @@ trials.obs.head(5)
     <tr>
       <th>2</th>
       <td>3</td>
+      <td>112.9924</td>
+      <td>128.957552</td>
       <td>0.00</td>
       <td>NaN</td>
       <td>NaN</td>
@@ -1494,6 +1618,8 @@ trials.obs.head(5)
     <tr>
       <th>3</th>
       <td>4</td>
+      <td>167.4924</td>
+      <td>183.457552</td>
       <td>-3.95</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1506,6 +1632,8 @@ trials.obs.head(5)
     <tr>
       <th>4</th>
       <td>5</td>
+      <td>217.8424</td>
+      <td>233.807552</td>
       <td>-3.80</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1577,7 +1705,7 @@ print(trials)
 trials.obs.head(5)
 ```
 
-    Photometry dataset with 60 trials, 320 timepoints, and 11 observations.
+    Photometry dataset with 60 trials, 320 timepoints, and 13 observations.
 
 
 
@@ -1602,6 +1730,8 @@ trials.obs.head(5)
     <tr style="text-align: right;">
       <th></th>
       <th>trial_num</th>
+      <th>start_time</th>
+      <th>stop_time</th>
       <th>trial_cue</th>
       <th>lever1</th>
       <th>lever2</th>
@@ -1618,6 +1748,8 @@ trials.obs.head(5)
     <tr>
       <th>0</th>
       <td>1</td>
+      <td>15.4924</td>
+      <td>31.457552</td>
       <td>-3.50</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1632,6 +1764,8 @@ trials.obs.head(5)
     <tr>
       <th>1</th>
       <td>2</td>
+      <td>65.1924</td>
+      <td>81.157553</td>
       <td>-2.70</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1646,6 +1780,8 @@ trials.obs.head(5)
     <tr>
       <th>2</th>
       <td>3</td>
+      <td>112.9924</td>
+      <td>128.957552</td>
       <td>0.00</td>
       <td>NaN</td>
       <td>NaN</td>
@@ -1660,6 +1796,8 @@ trials.obs.head(5)
     <tr>
       <th>3</th>
       <td>4</td>
+      <td>167.4924</td>
+      <td>183.457552</td>
       <td>-3.95</td>
       <td>0.0</td>
       <td>NaN</td>
@@ -1674,6 +1812,8 @@ trials.obs.head(5)
     <tr>
       <th>4</th>
       <td>5</td>
+      <td>217.8424</td>
+      <td>233.807552</td>
       <td>-3.80</td>
       <td>0.0</td>
       <td>NaN</td>

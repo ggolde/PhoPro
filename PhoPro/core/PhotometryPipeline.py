@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import inspect
 import logging
+import itertools
+import json
 
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal
@@ -17,6 +19,11 @@ LoaderKwargs = dict[str, Any] | list[dict[str, Any]]
 LoaderKwargsResolver = Callable[[Path], LoaderKwargs]
 LoaderKwargsInput = LoaderKwargs | LoaderKwargsResolver
 
+MultiPreprocessKwargsInput = dict[str, dict[str, Any]]
+
+#############################
+#region --- BASE PIPELINE ---
+#############################
 class PhotometryPipeline:
     """Run a loader, preprocessing, and trial-extraction workflow over inputs."""
 
@@ -585,3 +592,221 @@ class PhotometryPipeline:
         return trial_data
 
     #endregion
+
+##############################
+#region --- MULTI-PIPELINE ---
+##############################
+class MultiPipeline:
+    """Run a ``PhotometryPipeline`` across multiple preprocessing settings.
+
+    Parameters
+    ----------
+    pipeline : PhotometryPipeline
+        Pipeline instance used for every preprocessing run.
+    """
+
+    def __init__(
+            self,
+            pipeline: PhotometryPipeline,
+            ) -> None:
+        """Initialize the multi-run preprocessing wrapper."""
+        self.pipeline = pipeline
+
+    def build_preprocess_kwarg_permutations(
+            self,
+            default_kwargs: dict[str, Any],
+            to_permute_kwargs: dict[str, list[Any]],
+            name_from: list[str],
+            ) -> dict[str, dict[str, Any]]:
+        """Build named preprocessing kwargs from crossed parameter values.
+
+        Parameters
+        ----------
+        default_kwargs : dict[str, Any]
+            Baseline keyword arguments for
+            ``PhotometryExperiment.preprocess_signal()``.
+        to_permute_kwargs : dict[str, list[Any]]
+            Keyword arguments whose values are fully crossed to form
+            preprocessing configurations.
+        name_from : list[str]
+            Keys used to build each output name from the generated
+            configuration.
+
+        Returns
+        -------
+        dict[str, dict[str, Any]]
+            Mapping from generated run names to preprocessing keyword
+            dictionaries.
+        """
+        self.pipeline._validate_kwargs(PhotometryExperiment.preprocess_signal, default_kwargs)
+        self.pipeline._validate_kwargs(PhotometryExperiment.preprocess_signal, to_permute_kwargs)
+
+        def _permutation_generator(to_permute: dict):
+            """Yield dictionaries for each crossed preprocessing permutation."""
+            for inp in itertools.product(*to_permute.values()):
+                yield dict(zip(to_permute.keys(), inp))
+
+        permutations = [p for p in _permutation_generator(to_permute_kwargs)]
+
+        names = [
+            '_'.join([ f"{key}-{str(p[key])}" for key in name_from ]).replace('/', '-').replace('\\', '-') + '_perm' + str(i)
+            for i, p in enumerate(permutations)
+        ]
+
+        return dict(zip(names, permutations))
+
+    def build_preprocess_kwarg_across(
+            self,
+            default_kwargs: dict[str, Any],
+            across_kwargs: dict[str, list[Any]],
+            name_from: list[str],
+            ) -> dict[str, dict[str, Any]]:
+        """Build named preprocessing kwargs by varying one key at a time.
+
+        Parameters
+        ----------
+        default_kwargs : dict[str, Any]
+            Baseline keyword arguments for
+            ``PhotometryExperiment.preprocess_signal()``.
+        across_kwargs : dict[str, list[Any]]
+            Keyword arguments and candidate values to vary independently.
+            Unlike ``build_preprocess_kwarg_permutations()``, values are not
+            crossed across keys.
+        name_from : list[str]
+            Keys used to build each output name from the generated
+            configuration.
+
+        Returns
+        -------
+        dict[str, dict[str, Any]]
+            Mapping from generated run names to preprocessing keyword
+            dictionaries.
+        """
+        self.pipeline._validate_kwargs(PhotometryExperiment.preprocess_signal, default_kwargs)
+        self.pipeline._validate_kwargs(PhotometryExperiment.preprocess_signal, across_kwargs)
+
+        combos = {}
+        i = 0
+        for across_key, across_vals in across_kwargs.items():
+            for val in across_vals:
+                args = default_kwargs | {across_key : val}
+                name = '_'.join([ f"{key}-{str(args[key])}" for key in name_from ]).replace('/', '-').replace('\\', '-') + '_combo' + str(i)
+                combos[name] = args
+                i = i + 1
+
+        return combos
+
+    def run(
+            self,
+            # args
+            all_preprocess_kwargs: MultiPreprocessKwargsInput,
+            loader_kwargs: LoaderKwargsInput,
+            trial_extraction_kwargs: dict[str, Any],
+
+            # I/O
+            output_dir: str | Path,
+            preprocess_param_file: str = 'preprocess_params.json',
+            log_file: str = 'pipeline.log',
+            trial_output_file: str = 'trials.h5ad',
+
+            # pipeline params
+            low_memory_mode: bool = False,
+
+            # inheritance
+            passdown_metadata: list[str] | None = ['source'],
+
+            # dashboards
+            save_dashboards: bool = False,
+            dashboard_kwargs: dict[str, Any] = {},
+
+            # custom operations
+            id_builder: Callable[[type[PhotometryExperiment]], str] | None = None,
+            post_load_operation: Callable[[type[PhotometryExperiment]], None] | None = None,
+            post_preprocess_operation: Callable[[type[PhotometryExperiment]], None] | None = None,
+            post_trial_extraction_operation: Callable[[type[PhotometryExperiment]], None] | None = None,
+            ) -> None:
+        """Run the wrapped pipeline once for each preprocessing configuration.
+
+        Parameters
+        ----------
+        all_preprocess_kwargs : dict[str, dict[str, Any]]
+            Mapping from sub-run names to preprocessing keyword dictionaries.
+            Each sub-run name becomes a child directory of ``output_dir``.
+        loader_kwargs : LoaderKwargsInput
+            Loader keyword arguments, or a resolver returning them, passed to
+            ``PhotometryPipeline.run()``.
+        trial_extraction_kwargs : dict[str, Any]
+            Keyword arguments passed to trial extraction.
+        output_dir : str | Path
+            Parent directory for all preprocessing sub-runs.
+        preprocess_param_file : str, optional
+            File name used to save each sub-run preprocessing parameters, by
+            default ``"preprocess_params.json"``.
+        log_file : str, optional
+            File name used for each sub-run pipeline log, by default
+            ``"pipeline.log"``.
+        trial_output_file : str, optional
+            File name used for each sub-run trial output, by default
+            ``"trials.h5ad"``.
+        low_memory_mode : bool, optional
+            Whether to run the wrapped pipeline in low-memory mode, by default
+            False.
+        passdown_metadata : list[str] | None, optional
+            Metadata fields passed down during trial extraction, by default
+            ``["source"]``.
+        save_dashboards : bool, optional
+            Whether to save pipeline dashboards for each sub-run, by default
+            False.
+        dashboard_kwargs : dict[str, Any], optional
+            Keyword arguments passed to dashboard generation, by default ``{}``.
+        id_builder : Callable[[type[PhotometryExperiment]], str] | None, optional
+            Optional function passed to the wrapped pipeline for building
+            experiment identifiers, by default None.
+        post_load_operation : Callable[[type[PhotometryExperiment]], None] | None, optional
+            Optional callback run after loading in each pipeline run, by default
+            None.
+        post_preprocess_operation : Callable[[type[PhotometryExperiment]], None] | None, optional
+            Optional callback run after preprocessing in each pipeline run, by
+            default None.
+        post_trial_extraction_operation : Callable[[type[PhotometryExperiment]], None] | None, optional
+            Optional callback run after trial extraction in each pipeline run,
+            by default None.
+        """
+        # create parent output dir
+        output_dir = Path(output_dir)
+        if not output_dir.exists():
+            output_dir.mkdir(exist_ok=True)
+
+        # loop through preprocess params
+        for sub_run_name, preprocess_kwargs in all_preprocess_kwargs.items():
+            # set up subfolder names
+            sub_output_dir = output_dir / sub_run_name
+            if not sub_output_dir.exists():
+                sub_output_dir.mkdir(exist_ok=True)
+
+            sub_log_file = sub_output_dir / log_file
+            sub_param_file = sub_output_dir / preprocess_param_file
+
+            # save params
+            with open(sub_param_file, 'w') as f:
+                json.dump(preprocess_kwargs, f)
+
+            # run pipeline
+            self.pipeline.run(
+                loader_kwargs=loader_kwargs,
+                preprocess_kwargs=preprocess_kwargs,
+                trial_extraction_kwargs=trial_extraction_kwargs,
+                output_dir=sub_output_dir,
+                log_file=sub_log_file,
+                trial_output_file=trial_output_file,
+                passdown_metadata=passdown_metadata,
+                low_memory_mode=low_memory_mode,
+                id_builder=id_builder,
+                post_load_operation=post_load_operation,
+                post_preprocess_operation=post_preprocess_operation,
+                post_trial_extraction_operation=post_trial_extraction_operation,
+                save_dashboards=save_dashboards,
+                dashboard_kwargs=dashboard_kwargs,
+            )
+
+#endregion

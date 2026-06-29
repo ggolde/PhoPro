@@ -126,7 +126,7 @@ class TDTLoader(PhotometryLoader):
             box: str,
             event_labels: list[str],
             signal_label: str,
-            isosbestic_label: str,
+            isosbestic_label: str | None,
             downsample: int | None = None,
             downsample_kwargs: dict = {},
             annotation_file: str | None = None,
@@ -145,7 +145,8 @@ class TDTLoader(PhotometryLoader):
         signal_label : str
             Base label for the signal stream.
         isosbestic_label : str
-            Base label for the isosbestic stream.
+            Base label for the isosbestic stream. If ``None``, no isosbestic
+            signal is extracted.
         downsample : int or None, default=None
             Downsampling factor for raw streams. If ``None``, no downsampling
             is performed.
@@ -187,13 +188,18 @@ class TDTLoader(PhotometryLoader):
 
         # rip data out of TDT object
         sig = tdt_obj.streams[self.signal_label + self.box].data
-        iso = tdt_obj.streams[self.isosbestic_label + self.box].data
         fs = tdt_obj.streams[self.signal_label + self.box].fs
         start_time = tdt_obj.streams[self.signal_label + self.box].start_time
 
-        # downsample raw signals
+        # downsample raw signal
         raw_signal: np.ndarray = downsample_signal(np.asarray(sig, dtype=np.float32), factor=self.downsample, **self.downsample_kwargs)
-        raw_isosbestic: np.ndarray = downsample_signal(np.asarray(iso, dtype=np.float32), factor=self.downsample, **self.downsample_kwargs)
+
+        # handle isosbestic if present
+        if self.isosbestic_label is not None:
+            iso = tdt_obj.streams[self.isosbestic_label + self.box].data
+            raw_isosbestic: np.ndarray = downsample_signal(np.asarray(iso, dtype=np.float32), factor=self.downsample, **self.downsample_kwargs)
+        else:
+            raw_isosbestic = None
 
         # contruct time
         n_times = raw_signal.size
