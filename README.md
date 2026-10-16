@@ -56,7 +56,7 @@ MIT License.
 ## Authors
 This package is developed and used internally at the [Bizon-Setlow Lab](https://burke.neuroscience.ufl.edu/profile/bizon-jennifer/) at the University of Florida.
 
-**Griffin Golde**: University of Florida, contact: **[ggolde@ufl.edu](mailto:ggolde@ufl.edu)**
+**Griffin Golde**: University of Colorado Boulder, contact: **[griffin.golde@colorado.edu](mailto:griffin.golde@colorado.edu)**
 
 ## Citations
 
